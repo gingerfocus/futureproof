@@ -17,4 +17,15 @@ pub usingnamespace @cImport({
     if (builtin.os.tag == .macos) {
         @cInclude("objc/message.h");
     }
+
+    // if (builtin.os.tag == .linux) {
+        @cInclude("wayland-client-core.h");
+        @cInclude("wayland-client-protocol.h");
+        @cInclude("wayland-client.h");
+        // @cInclude("wayland-egl.h");
+
+        // @cInclude("xkbcommon/xkbcommon.h");
+
+        // @cInclude("xdg-shell-protocol.h");
+    // }
 });

@@ -49,13 +49,13 @@ pub const RPC = struct {
     listener: *Listener,
 
     output: std.fs.File.Writer, // This is the stdin of the RPC subprocess
-    process: *std.ChildProcess,
-    thread: *std.Thread,
+    process: std.process.Child,
+    thread: std.Thread,
     alloc: *std.mem.Allocator,
     msgid: u32,
 
     pub fn init(argv: []const []const u8, alloc: *std.mem.Allocator) !RPC {
-        const child = try std.ChildProcess.init(argv, alloc);
+        var child = std.process.Child.init(argv, alloc.*);
         child.stdin_behavior = .Pipe;
         child.stdout_behavior = .Pipe;
         try child.spawn();
@@ -70,9 +70,9 @@ pub const RPC = struct {
             .alloc = alloc,
         };
 
-        const thread = try std.Thread.spawn(listener, Listener.run);
+        const thread = try std.Thread.spawn(.{}, Listener.run, .{listener});
 
-        const rpc = .{
+        const rpc = RPC{
             .listener = listener,
             .output = out,
             .process = child,
@@ -97,8 +97,9 @@ pub const RPC = struct {
 
     pub fn call(self: *RPC, method: []const u8, params: anytype) !msgpack.Value {
         // We'll use an arena for the encoded message
-        var arena = std.heap.ArenaAllocator.init(self.alloc);
-        const tmp_alloc: *std.mem.Allocator = &arena.allocator;
+        var arena = std.heap.ArenaAllocator.init(self.alloc.*);
+        var all = arena.allocator();
+        const tmp_alloc: *std.mem.Allocator = &all;
         defer arena.deinit();
 
         // Push the serialized call to the subprocess's stdin
@@ -117,7 +118,7 @@ pub const RPC = struct {
         // Check for error responses
         const err = response.Array[2];
         const result = response.Array[3];
-        if (err != @TagType(msgpack.Value).Nil) {
+        if (err != std.meta.Tag(msgpack.Value).Nil) {
             // TODO: handle error here
             std.debug.panic("Got error in msgpack-rpc call: {}\n", .{err.Array[1]});
         }
@@ -130,16 +131,16 @@ pub const RPC = struct {
     }
 
     pub fn deinit(self: *RPC) void {
-        self.process.deinit();
+        _ = self.process.kill() catch {};
         self.alloc.destroy(self.listener);
     }
 
-    pub fn halt(self: *RPC) !std.ChildProcess.Term {
+    pub fn halt(self: *RPC) !std.process.Child.Term {
         // Manually close stdin, to halt the subprocess on the other side
-        (self.process.stdin orelse unreachable).close();
+        self.process.stdin.?.close();
         self.process.stdin = null;
         const term = try self.process.wait();
-        self.thread.wait();
+        self.thread.join();
 
         // Flush out the queue to avoid memory leaks
         while (self.get_event()) |event| {

@@ -29,12 +29,13 @@ pub const Preview = struct {
         frag: []const u32,
         draw_continuously: bool,
     ) !Preview {
-        var arena = std.heap.ArenaAllocator.init(alloc);
-        const tmp_alloc: *std.mem.Allocator = &arena.allocator;
+        var arena = std.heap.ArenaAllocator.init(alloc.*);
+        var all =arena.allocator();
+        const tmp_alloc: *std.mem.Allocator = &all;
         defer arena.deinit();
 
         // Build the shaders using shaderc
-        const vert_spv = shaderc.build_shader_from_file(tmp_alloc, "shaders/preview.vert") catch |err| {
+        const vert_spv = shaderc.build_shader_from_file(tmp_alloc, "shaders/preview.vert") catch {
             std.debug.panic("Could not build preview.vert", .{});
         };
         const vert_shader = c.wgpu_device_create_shader_module(
@@ -137,31 +138,31 @@ pub const Preview = struct {
                     .entry_point = "main",
                 },
                 .rasterization_state = &(c.WGPURasterizationStateDescriptor){
-                    .front_face = c.WGPUFrontFace._Ccw,
-                    .cull_mode = c.WGPUCullMode._None,
+                    .front_face = c.WGPUFrontFace_Ccw,
+                    .cull_mode = c.WGPUCullMode_None,
                     .depth_bias = 0,
                     .depth_bias_slope_scale = 0.0,
                     .depth_bias_clamp = 0.0,
                 },
-                .primitive_topology = c.WGPUPrimitiveTopology._TriangleList,
+                .primitive_topology = c.WGPUPrimitiveTopology_TriangleList,
                 .color_states = &(c.WGPUColorStateDescriptor){
-                    .format = c.WGPUTextureFormat._Bgra8Unorm,
+                    .format = c.WGPUTextureFormat_Bgra8Unorm,
                     .alpha_blend = (c.WGPUBlendDescriptor){
-                        .src_factor = c.WGPUBlendFactor._One,
-                        .dst_factor = c.WGPUBlendFactor._Zero,
-                        .operation = c.WGPUBlendOperation._Add,
+                        .src_factor = c.WGPUBlendFactor_One,
+                        .dst_factor = c.WGPUBlendFactor_Zero,
+                        .operation = c.WGPUBlendOperation_Add,
                     },
                     .color_blend = (c.WGPUBlendDescriptor){
-                        .src_factor = c.WGPUBlendFactor._One,
-                        .dst_factor = c.WGPUBlendFactor._Zero,
-                        .operation = c.WGPUBlendOperation._Add,
+                        .src_factor = c.WGPUBlendFactor_One,
+                        .dst_factor = c.WGPUBlendFactor_Zero,
+                        .operation = c.WGPUBlendOperation_Add,
                     },
                     .write_mask = c.WGPUColorWrite_ALL,
                 },
                 .color_states_length = 1,
                 .depth_stencil_state = null,
                 .vertex_state = (c.WGPUVertexStateDescriptor){
-                    .index_format = c.WGPUIndexFormat._Uint16,
+                    .index_format = c.WGPUIndexFormat_Uint16,
                     .vertex_buffers = null,
                     .vertex_buffers_length = 0,
                 },
@@ -215,13 +216,13 @@ pub const Preview = struct {
         const dt_est = std.math.pow(i64, self.uniforms._tiles_per_side, 2) * dt;
 
         // We'd like to keep the UI running at 60 FPS, approximately
-        const t = std.math.ceil(std.math.sqrt(@intToFloat(f32, @divFloor(dt_est, 16))));
+        const t = std.math.ceil(std.math.sqrt(@as(f32, @floatFromInt(dt_est))));
 
         std.debug.print(
-            "Switching from {} to {} tiles per side\n",
+            "Switching from {?} to {} tiles per side\n",
             .{ self.uniforms._tiles_per_side, t },
         );
-        var t_ = @floatToInt(u32, t);
+        var t_ = @as(u32, @intFromFloat(t));
         if (t_ > 5) {
             t_ = 5;
         }
@@ -240,8 +241,8 @@ pub const Preview = struct {
         self.destroy_textures();
 
         self.tex_size = (c.WGPUExtent3d){
-            .width = @intCast(u32, width / 2),
-            .height = @intCast(u32, height),
+            .width = @as(u32, width / 2),
+            .height = @as(u32, height),
             .depth = 1,
         };
 
@@ -253,8 +254,8 @@ pub const Preview = struct {
                     .size = self.tex_size,
                     .mip_level_count = 1,
                     .sample_count = 1,
-                    .dimension = c.WGPUTextureDimension._D2,
-                    .format = c.WGPUTextureFormat._Bgra8Unorm,
+                    .dimension = c.WGPUTextureDimension_D2,
+                    .format = c.WGPUTextureFormat_Bgra8Unorm,
 
                     // We render to this texture, then use it as a source when
                     // blitting into the final UI image
@@ -274,9 +275,9 @@ pub const Preview = struct {
                 self.tex[i],
                 &(c.WGPUTextureViewDescriptor){
                     .label = "preview_tex_view",
-                    .dimension = c.WGPUTextureViewDimension._D2,
-                    .format = c.WGPUTextureFormat._Bgra8Unorm,
-                    .aspect = c.WGPUTextureAspect._All,
+                    .dimension = c.WGPUTextureViewDimension_D2,
+                    .format = c.WGPUTextureFormat_Bgra8Unorm,
+                    .aspect = c.WGPUTextureAspect_All,
                     .base_mip_level = 0,
                     .level_count = 1,
                     .base_array_layer = 0,
@@ -285,8 +286,8 @@ pub const Preview = struct {
             );
         }
 
-        self.uniforms.iResolution.x = @intToFloat(f32, width) / 2;
-        self.uniforms.iResolution.y = @intToFloat(f32, height);
+        self.uniforms.iResolution.x = @as(f32, @floatFromInt(width)) / 2;
+        self.uniforms.iResolution.y = @as(f32, @floatFromInt(height));
     }
 
     pub fn redraw(self: *Self) void {
@@ -298,28 +299,28 @@ pub const Preview = struct {
         // Set the time in the uniforms array
         if (self.uniforms._tile_num == 0) {
             const time_ms = std.time.milliTimestamp() - self.start_time;
-            self.uniforms.iTime = @intToFloat(f32, time_ms) / 1000.0;
+            self.uniforms.iTime = @as(f32, @floatFromInt(time_ms)) / 1000.0;
         }
 
         c.wgpu_queue_write_buffer(
             self.queue,
             self.uniform_buffer,
             0,
-            @ptrCast([*c]const u8, &self.uniforms),
+            @as([*c]const u8, @ptrCast(&self.uniforms)),
             @sizeOf(c.fpPreviewUniforms),
         );
 
         const load_op = if (self.uniforms._tile_num == 0)
-            c.WGPULoadOp._Clear
+            c.WGPULoadOp_Clear
         else
-            c.WGPULoadOp._Load;
+            c.WGPULoadOp_Load;
         const color_attachments = [_]c.WGPURenderPassColorAttachmentDescriptor{
             (c.WGPURenderPassColorAttachmentDescriptor){
                 .attachment = if (self.uniforms._tiles_per_side == 1) self.tex_view[1] else self.tex_view[0],
                 .resolve_target = 0,
                 .channel = (c.WGPUPassChannel_Color){
-                    .load_op = load_op,
-                    .store_op = c.WGPUStoreOp._Store,
+                    .load_op = @intCast(load_op),
+                    .store_op = c.WGPUStoreOp_Store,
                     .clear_value = (c.WGPUColor){
                         .r = 0.0,
                         .g = 0.0,

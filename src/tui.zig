@@ -60,8 +60,10 @@ pub const Tui = struct {
 
         var itr = self.buffers.iterator();
         while (itr.next()) |buf| {
-            buf.value.deinit();
-            self.alloc.destroy(buf.value);
+            _ = buf;
+            unreachable;
+            // buf.value.deinit();
+            // self.alloc.destroy(buf.value);
         }
         self.buffers.deinit();
         c.shaderc_compiler_release(self.compiler);
@@ -75,15 +77,16 @@ pub const Tui = struct {
         try self.rpc.call_release("nvim_buf_attach", .{ id, true, options });
 
         // Create a buffer on the heap and store it in the hash map.
-        var buf = try self.alloc.create(Buffer);
+        const buf = try self.alloc.create(Buffer);
         buf.* = try Buffer.init(self.alloc);
         try self.buffers.put(id, buf);
     }
 
     pub fn init(alloc: *std.mem.Allocator) !*Self {
         // We'll use an arena for transient CPU-side resources
-        var arena = std.heap.ArenaAllocator.init(alloc);
-        const tmp_alloc: *std.mem.Allocator = &arena.allocator;
+        var arena = std.heap.ArenaAllocator.init(alloc.*);
+        var all = arena.allocator();
+        const tmp_alloc: *std.mem.Allocator = &all;
         defer arena.deinit();
 
         var width: c_int = 900;
@@ -98,10 +101,10 @@ pub const Tui = struct {
             FONT_SIZE,
             512,
         );
-        const renderer = try Renderer.init(tmp_alloc, window.window, &font);
+        const renderer = try Renderer.init(alloc.*, window.window, &font);
 
-        const x_tiles = @intCast(u32, width) / font.u.glyph_advance;
-        const y_tiles = @intCast(u32, height) / font.u.glyph_height;
+        const x_tiles = @as(u32, @intCast(width)) / font.u.glyph_advance;
+        const y_tiles = @as(u32, @intCast(height)) / font.u.glyph_height;
 
         // Start up the RPC subprocess, using the global allocator
         const nvim_cmd = [_][]const u8{
@@ -122,7 +125,7 @@ pub const Tui = struct {
             .rpc = rpc,
             .font = font,
 
-            .buffers = std.AutoHashMap(u32, *Buffer).init(alloc),
+            .buffers = std.AutoHashMap(u32, *Buffer).init(alloc.*),
             .debounce = Debounce.init(),
             .compiler = c.shaderc_compiler_initialize(),
 
@@ -136,8 +139,8 @@ pub const Tui = struct {
             .mouse_scroll_y = 0.0,
 
             .u = c.fpUniforms{
-                .width_px = @intCast(u32, width),
-                .height_px = @intCast(u32, height),
+                .width_px = @as(u32, @intCast(width)),
+                .height_px = @as(u32, @intCast(height)),
                 .font = font.u,
 
                 .attrs = undefined,
@@ -152,11 +155,11 @@ pub const Tui = struct {
             mouse_button_cb,
             mouse_pos_cb,
             scroll_cb,
-            @ptrCast(?*c_void, out),
+            @as(?*anyopaque, @ptrCast(out)),
         );
 
         { // Attach the UI via RPC
-            var options = msgpack.KeyValueMap.init(alloc);
+            var options = msgpack.KeyValueMap.init(alloc.*);
             try options.put(
                 msgpack.Key{ .RawString = "ext_linegrid" },
                 msgpack.Value{ .Boolean = true },
@@ -169,7 +172,7 @@ pub const Tui = struct {
         }
 
         { // Try to subscribe to Fp events
-            var options = msgpack.KeyValueMap.init(alloc);
+            var options = msgpack.KeyValueMap.init(alloc.*);
             defer options.deinit();
             try rpc.call_release("nvim_subscribe", .{"Fp"});
         }
@@ -256,7 +259,7 @@ pub const Tui = struct {
             }
             // rows < 0 --> moving rows downwards
         } else if (line[5] == .Int) {
-            const rows = @intCast(u32, -line[5].Int);
+            const rows = @as(u32, -line[5].Int);
             var y = bot - 1;
             while (y >= top + rows) : (y -= 1) {
                 var x = left;
@@ -273,19 +276,19 @@ pub const Tui = struct {
             return char[0];
         } else if (char[0] >> 5 == 0b110) {
             std.debug.assert(char.len == 2);
-            return (@intCast(u32, char[0] & 0b00011111) << 6) |
-                @intCast(u32, char[1] & 0b00111111);
+            return (@as(u32, char[0] & 0b00011111) << 6) |
+                @as(u32, char[1] & 0b00111111);
         } else if (char[0] >> 4 == 0b1110) {
             std.debug.assert(char.len == 3);
-            return (@intCast(u32, char[0] & 0b00001111) << 12) |
-                (@intCast(u32, char[1] & 0b00111111) << 6) |
-                @intCast(u32, char[2] & 0b00111111);
+            return (@as(u32, char[0] & 0b00001111) << 12) |
+                (@as(u32, char[1] & 0b00111111) << 6) |
+                @as(u32, char[2] & 0b00111111);
         } else if (char[0] >> 3 == 0b11110) {
             std.debug.assert(char.len == 4);
-            return (@intCast(u32, char[0] & 0b00000111) << 18) |
-                (@intCast(u32, char[1] & 0b00111111) << 12) |
-                (@intCast(u32, char[2] & 0b00111111) << 6) |
-                @intCast(u32, char[3] & 0b00111111);
+            return (@as(u32, char[0] & 0b00000111) << 18) |
+                (@as(u32, char[1] & 0b00111111) << 12) |
+                (@as(u32, char[2] & 0b00111111) << 6) |
+                @as(u32, char[3] & 0b00111111);
         }
         return 0;
     }
@@ -301,7 +304,7 @@ pub const Tui = struct {
             const cell = cell_.Array;
             const text = cell[0].RawString;
             if (cell.len >= 2) {
-                hl_attr = @intCast(u16, cell[1].UInt);
+                hl_attr = @as(u16, cell[1].UInt);
             }
             const repeat = if (cell.len >= 3) cell[2].UInt else 1;
             const codepoint = decode_utf8(text);
@@ -326,7 +329,7 @@ pub const Tui = struct {
             std.debug.assert(char < self.u.font.glyphs.len);
             var i: usize = 0;
             while (i < repeat) : (i += 1) {
-                self.char_at(col, row).* = char | (@intCast(u32, hl_attr) << 16);
+                self.char_at(col, row).* = char | (@as(u32, hl_attr) << 16);
                 col += 1; // TODO: unicode?!
             }
         }
@@ -350,8 +353,8 @@ pub const Tui = struct {
         std.debug.assert(grid == 1);
 
         // Record the cursor position at the end of the grid
-        self.char_grid[self.total_tiles] = @intCast(u32, cmd[2].UInt);
-        self.char_grid[self.total_tiles + 1] = @intCast(u32, cmd[1].UInt);
+        self.char_grid[self.total_tiles] = @as(u32, cmd[2].UInt);
+        self.char_grid[self.total_tiles + 1] = @as(u32, cmd[1].UInt);
     }
 
     fn decode_hl_attrs(attr: *const msgpack.KeyValueMap) c.fpHlAttrs {
@@ -365,11 +368,11 @@ pub const Tui = struct {
         var itr = attr.iterator();
         while (itr.next()) |entry| {
             if (std.mem.eql(u8, entry.key.RawString, "foreground")) {
-                out.foreground = @intCast(u32, entry.value.UInt);
+                out.foreground = @as(u32, entry.value.UInt);
             } else if (std.mem.eql(u8, entry.key.RawString, "background")) {
-                out.background = @intCast(u32, entry.value.UInt);
+                out.background = @as(u32, entry.value.UInt);
             } else if (std.mem.eql(u8, entry.key.RawString, "special")) {
-                out.special = @intCast(u32, entry.value.UInt);
+                out.special = @as(u32, entry.value.UInt);
             } else if (std.mem.eql(u8, entry.key.RawString, "bold") and entry.value.Boolean) {
                 out.flags |= c.FP_FLAG_BOLD;
             } else if (std.mem.eql(u8, entry.key.RawString, "italic") and entry.value.Boolean) {
@@ -421,15 +424,15 @@ pub const Tui = struct {
                     std.debug.panic("Unknown cursor shape: {}\n", .{entry.value});
                 }
             } else if (std.mem.eql(u8, entry.key.RawString, "cell_percentage")) {
-                out.cell_percentage = @intCast(u32, entry.value.UInt);
+                out.cell_percentage = @as(u32, entry.value.UInt);
             } else if (std.mem.eql(u8, entry.key.RawString, "blinkwait")) {
-                out.blinkwait = @intCast(u32, entry.value.UInt);
+                out.blinkwait = @as(u32, entry.value.UInt);
             } else if (std.mem.eql(u8, entry.key.RawString, "blinkon")) {
-                out.blinkon = @intCast(u32, entry.value.UInt);
+                out.blinkon = @as(u32, entry.value.UInt);
             } else if (std.mem.eql(u8, entry.key.RawString, "blinkoff")) {
-                out.blinkoff = @intCast(u32, entry.value.UInt);
+                out.blinkoff = @as(u32, entry.value.UInt);
             } else if (std.mem.eql(u8, entry.key.RawString, "attr_id")) {
-                out.attr_id = @intCast(u32, entry.value.UInt);
+                out.attr_id = @as(u32, entry.value.UInt);
             } else {
                 // Ignore other elements for now
             }
@@ -438,7 +441,6 @@ pub const Tui = struct {
     }
 
     fn api_mode_info_set(self: *Self, cmd: []const msgpack.Value) void {
-        const cursor_style_enabled = cmd[0].Boolean; // unused for now?
         std.debug.assert(cmd[1].Array.len < c.FP_MAX_MODES);
         var i: u32 = 0;
         while (i < cmd[1].Array.len) : (i += 1) {
@@ -447,14 +449,14 @@ pub const Tui = struct {
     }
 
     fn api_mode_change(self: *Self, cmd: []const msgpack.Value) void {
-        self.char_grid[self.total_tiles + 2] = @intCast(u32, cmd[1].UInt);
+        self.char_grid[self.total_tiles + 2] = @as(u32, cmd[1].UInt);
     }
 
     fn api_default_colors_set(self: *Self, cmd: []const msgpack.Value) void {
         self.u.attrs[0] = (c.fpHlAttrs){
-            .foreground = @intCast(u32, cmd[0].UInt),
-            .background = @intCast(u32, cmd[1].UInt),
-            .special = @intCast(u32, cmd[2].UInt),
+            .foreground = @as(u32, cmd[0].UInt),
+            .background = @as(u32, cmd[1].UInt),
+            .special = @as(u32, cmd[2].UInt),
             .flags = 0,
         };
         self.uniforms_changed = true;
@@ -479,15 +481,15 @@ pub const Tui = struct {
                     .Okay => {},
                 }
             } else {
-                std.debug.warn("Invalid buffer: {}\n", .{buf_num});
+                std.log.warn("Invalid buffer: {}\n", .{buf_num});
             }
         } else {
-            std.debug.warn("Unknown method target: {}\n", .{target.type});
+            std.log.warn("Unknown method target: {}\n", .{target.type});
         }
     }
 
     fn fp_buf_new(self: *Self, args: []const msgpack.Value) !void {
-        try self.attach_buffer(@intCast(u32, args[0].UInt));
+        try self.attach_buffer(@as(u32, args[0].UInt));
     }
 
     fn call_fp(self: *Self, event: []const msgpack.Value) !void {
@@ -496,42 +498,38 @@ pub const Tui = struct {
         const args = args_[1..];
 
         // Work around issue #4639 by storing opts in a variable
-        comptime const opts = std.builtin.CallOptions{};
 
-        inline for (@typeInfo(Self).Struct.decls) |s| {
+        inline for (@typeInfo(Self).@"struct".decls) |s| {
             // Same trick as call_api
-            comptime const is_fp = std.mem.startsWith(u8, s.name, "fp_");
+            const is_fp = comptime std.mem.startsWith(u8, s.name, "fp_");
             if (is_fp) {
                 if (std.mem.eql(u8, name, s.name[3..])) {
                     return @call(
-                        opts,
+                        .default,
                         @field(Self, s.name),
                         .{ self, args },
                     );
                 }
             }
         }
-        std.debug.warn("[Tui] Unknown Fp event: {}\n", .{name});
+        std.log.warn("[Tui] Unknown Fp event: {s}\n", .{name});
     }
 
     fn call_api(self: *Self, event: []const msgpack.Value) !void {
-        // Work around issue #4639 by storing opts in a variable
-        comptime const opts = std.builtin.CallOptions{};
-
         // For each command in the incoming stream, try to match
         // it against a local api_XYZ declaration.
         for (event[2].Array) |cmd| {
             var matched = false;
             const api_name = cmd.Array[0].RawString;
-            inline for (@typeInfo(Self).Struct.decls) |s| {
+            inline for (@typeInfo(Self).@"struct".decls) |s| {
                 // This conditional should be optimized out, since
                 // it's known at comptime.
-                comptime const is_api = std.mem.startsWith(u8, s.name, "api_");
+                const is_api = comptime std.mem.startsWith(u8, s.name, "api_");
                 if (is_api) {
                     if (std.mem.eql(u8, api_name, s.name[4..])) {
                         for (cmd.Array[1..]) |v| {
                             @call(
-                                opts,
+                                .default,
                                 @field(Self, s.name),
                                 .{ self, v.Array },
                             );
@@ -542,7 +540,7 @@ pub const Tui = struct {
                 }
             }
             if (!matched) {
-                std.debug.warn("[Tui] Unimplemented API: {}\n", .{api_name});
+                std.log.warn("[Tui] Unimplemented API: {s}\n", .{api_name});
             }
         }
     }
@@ -622,8 +620,9 @@ pub const Tui = struct {
                 try self.rpc.call_release("nvim_command", .{":lclose"});
             },
             .Error => |e| {
-                var arena = std.heap.ArenaAllocator.init(self.alloc);
-                const tmp_alloc: *std.mem.Allocator = &arena.allocator;
+                var arena = std.heap.ArenaAllocator.init(self.alloc.*);
+                var all = arena.allocator();
+                const tmp_alloc: *std.mem.Allocator = &all;
                 defer arena.deinit();
 
                 self.renderer.clear_preview(self.alloc);
@@ -634,7 +633,7 @@ pub const Tui = struct {
                         line_num = n;
                     }
                     const cmd = try std.fmt.allocPrint(
-                        tmp_alloc,
+                        tmp_alloc.*,
                         ":sign place {} line={} name=fpErr buffer={}",
                         .{
                             line_num,
@@ -645,8 +644,8 @@ pub const Tui = struct {
                     try self.rpc.call_release("nvim_command", .{cmd});
 
                     const lexp = try std.fmt.allocPrint(
-                        tmp_alloc,
-                        ":ladd \"{}:{}\"",
+                        tmp_alloc.*,
+                        ":ladd \"{}:{s}\"",
                         .{ line_num, line_err.msg },
                     );
                     try self.rpc.call_release("nvim_command", .{lexp});
@@ -667,8 +666,8 @@ pub const Tui = struct {
     }
 
     pub fn update_size(self: *Self, width: c_int, height: c_int) void {
-        self.u.width_px = @intCast(u32, width);
-        self.u.height_px = @intCast(u32, height);
+        self.u.width_px = @as(u32, @intCast(width));
+        self.u.height_px = @as(u32, @intCast(height));
 
         const density = self.u.width_px / self.window.get_window_width();
         if (density != self.pixel_density) {
@@ -717,7 +716,7 @@ pub const Tui = struct {
 
     fn get_ascii_lower(key: c_int) ?u8 {
         if (key >= 1 and key <= 127) {
-            const char = @intCast(u8, key);
+            const char = @as(u8, @intCast(key));
             if (char >= 'A' and char <= 'Z') {
                 return char + ('a' - 'A');
             } else {
@@ -833,20 +832,21 @@ pub const Tui = struct {
     // Helper function to convert a mod bitfield into a string
     // alloc must be an arena allocator, for ease of memory management
     fn encode_mods(alloc: *std.mem.Allocator, mods: c_int) ![]const u8 {
-        var out = try std.fmt.allocPrint(alloc, "", .{});
+        var out = try std.fmt.allocPrint(alloc.*, "", .{});
         std.debug.assert(out.len == 0);
+        const a = alloc.*;
 
         if ((mods & c.GLFW_MOD_SHIFT) != 0) {
-            out = try std.fmt.allocPrint(alloc, "S-{}", .{out});
+            out = try std.fmt.allocPrint(a, "S-{s}", .{out});
         }
         if ((mods & c.GLFW_MOD_CONTROL) != 0) {
-            out = try std.fmt.allocPrint(alloc, "C-{}", .{out});
+            out = try std.fmt.allocPrint(a, "C-{s}", .{out});
         }
         if ((mods & c.GLFW_MOD_ALT) != 0) {
-            out = try std.fmt.allocPrint(alloc, "A-{}", .{out});
+            out = try std.fmt.allocPrint(a, "A-{s}", .{out});
         }
         if ((mods & c.GLFW_MOD_SUPER) != 0) {
-            out = try std.fmt.allocPrint(alloc, "D-{}", .{out});
+            out = try std.fmt.allocPrint(a, "D-{s}", .{out});
         }
         return out;
     }
@@ -862,8 +862,9 @@ pub const Tui = struct {
     }
 
     pub fn on_key(self: *Self, key: c_int, mods: c_int) !void {
-        var arena = std.heap.ArenaAllocator.init(self.alloc);
-        var alloc: *std.mem.Allocator = &arena.allocator;
+        var arena = std.heap.ArenaAllocator.init(self.alloc.*);
+        var all = arena.allocator();
+        const alloc: *std.mem.Allocator = &all;
         defer arena.deinit();
 
         var char_str = [1]u8{0};
@@ -881,18 +882,18 @@ pub const Tui = struct {
                 str = &char_str;
             }
 
-            const mods_ = mods & (~@intCast(c_int, c.GLFW_MOD_SHIFT));
+            const mods_ = mods & (~@as(c_int, c.GLFW_MOD_SHIFT));
             if (mods_ != 0) {
                 const mod_str = try encode_mods(alloc, mods_);
                 std.debug.assert(mod_str.len != 0);
-                str = try std.fmt.allocPrint(alloc, "<{}{}>", .{ mod_str, str });
+                str = try std.fmt.allocPrint(alloc.*, "<{s}{?s}>", .{ mod_str, str });
             }
         } else if (get_encoded(key)) |enc| {
             if (mods == 0) {
-                str = try std.fmt.allocPrint(alloc, "<{}>", .{enc});
+                str = try std.fmt.allocPrint(alloc.*, "<{s}>", .{enc});
             } else {
                 const mod_str = try encode_mods(alloc, mods);
-                str = try std.fmt.allocPrint(alloc, "<{}{}>", .{ mod_str, enc });
+                str = try std.fmt.allocPrint(alloc.*, "<{s}{s}>", .{ mod_str, enc });
             }
         } else {
             std.debug.print("Got unknown key {} {}\n", .{ key, mods });
@@ -904,17 +905,18 @@ pub const Tui = struct {
     }
 
     pub fn on_mouse_pos(self: *Self, x: f64, y: f64) !void {
-        self.mouse_tile_x = @floatToInt(i32, @intToFloat(f64, self.pixel_density) * x / @intToFloat(f64, self.u.font.glyph_advance));
-        self.mouse_tile_y = @floatToInt(i32, @intToFloat(f64, self.pixel_density) * y / @intToFloat(f64, self.u.font.glyph_height));
+        self.mouse_tile_x = @as(i32, @intFromFloat(x));
+        self.mouse_tile_y = @as(i32, @intFromFloat(y));
     }
 
     pub fn on_scroll(self: *Self, dx: f64, dy: f64) !void {
+        _ = dx;
         // Reset accumulator if we've changed directions
         if (self.mouse_scroll_y != 0 and std.math.signbit(dy) != std.math.signbit(self.mouse_scroll_y)) {
             self.mouse_scroll_y = 0;
         }
         self.mouse_scroll_y += dy;
-        while (std.math.absFloat(self.mouse_scroll_y) >= SCROLL_THRESHOLD) {
+        while (@abs(self.mouse_scroll_y) >= SCROLL_THRESHOLD) {
             const dir = if (self.mouse_scroll_y > 0) "up" else "down";
             if (self.mouse_scroll_y > 0) {
                 self.mouse_scroll_y -= SCROLL_THRESHOLD;
@@ -935,17 +937,19 @@ pub const Tui = struct {
     }
 
     pub fn on_mouse_button(self: *Self, button: c_int, action: c_int, mods: c_int) !void {
-        var arena = std.heap.ArenaAllocator.init(self.alloc);
-        var alloc: *std.mem.Allocator = &arena.allocator;
+        var arena = std.heap.ArenaAllocator.init(self.alloc.*);
+        var all = arena.allocator();
+        const alloc: *std.mem.Allocator = &all;
         defer arena.deinit();
 
         const button_str = switch (button) {
             c.GLFW_MOUSE_BUTTON_LEFT => "left",
             c.GLFW_MOUSE_BUTTON_RIGHT => "right",
             c.GLFW_MOUSE_BUTTON_MIDDLE => "middle",
-            else => |b| {
-                std.debug.warn("Ignoring unknown mouse: {}\n", .{b});
-                return;
+            else => |_| {
+                // std.log.warn("Ignoring unknown mouse: {}\n", .{b});
+                // return;
+                unreachable;
             },
         };
 
@@ -969,13 +973,15 @@ pub const Tui = struct {
 
 export fn size_cb(w: ?*c.GLFWwindow, width: c_int, height: c_int) void {
     const ptr = c.glfwGetWindowUserPointer(w) orelse std.debug.panic("Missing user pointer", .{});
-    var tui = @ptrCast(*Tui, @alignCast(8, ptr));
+    const tui: *Tui = @ptrCast(@alignCast(ptr));
     tui.update_size(width, height);
 }
 
 export fn key_cb(w: ?*c.GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) void {
+    _ = scancode;
+
     const ptr = c.glfwGetWindowUserPointer(w) orelse std.debug.panic("Missing user pointer", .{});
-    var tui = @ptrCast(*Tui, @alignCast(8, ptr));
+    const tui: *Tui = @ptrCast(@alignCast(ptr));
     if (action == c.GLFW_PRESS or action == c.GLFW_REPEAT) {
         tui.on_key(key, mods) catch |err| {
             std.debug.panic("Failed on_key: {}\n", .{err});
@@ -985,7 +991,7 @@ export fn key_cb(w: ?*c.GLFWwindow, key: c_int, scancode: c_int, action: c_int, 
 
 export fn mouse_pos_cb(w: ?*c.GLFWwindow, x: f64, y: f64) void {
     const ptr = c.glfwGetWindowUserPointer(w) orelse std.debug.panic("Missing user pointer", .{});
-    var tui = @ptrCast(*Tui, @alignCast(8, ptr));
+    const tui: *Tui = @ptrCast(@alignCast(ptr));
     tui.on_mouse_pos(x, y) catch |err| {
         std.debug.print("Failed on_mouse_pos: {}\n", .{err});
     };
@@ -993,7 +999,7 @@ export fn mouse_pos_cb(w: ?*c.GLFWwindow, x: f64, y: f64) void {
 
 export fn mouse_button_cb(w: ?*c.GLFWwindow, button: c_int, action: c_int, mods: c_int) void {
     const ptr = c.glfwGetWindowUserPointer(w) orelse std.debug.panic("Missing user pointer", .{});
-    var tui = @ptrCast(*Tui, @alignCast(8, ptr));
+    const tui: *Tui = @ptrCast(@alignCast(ptr));
     tui.on_mouse_button(button, action, mods) catch |err| {
         std.debug.print("Failed on_mouse_button: {}\n", .{err});
     };
@@ -1001,7 +1007,7 @@ export fn mouse_button_cb(w: ?*c.GLFWwindow, button: c_int, action: c_int, mods:
 
 export fn scroll_cb(w: ?*c.GLFWwindow, dx: f64, dy: f64) void {
     const ptr = c.glfwGetWindowUserPointer(w) orelse std.debug.panic("Missing user pointer", .{});
-    var tui = @ptrCast(*Tui, @alignCast(8, ptr));
+    const tui: *Tui = @ptrCast(@alignCast(ptr));
     tui.on_scroll(dx, dy) catch |err| {
         std.debug.print("Failed on_scroll: {}\n", .{err});
     };

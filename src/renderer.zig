@@ -9,6 +9,51 @@ const Blit = @import("blit.zig").Blit;
 const Preview = @import("preview.zig").Preview;
 const Shader = @import("shaderc.zig").Shader;
 
+const State = struct {
+    compositor: ?*c.wl_compositor,
+    seat: ?*c.wl_seat,
+    wshm: ?*c.wl_shm,
+    // wm_base: ?*c.wl_,
+};
+const wl_registry_listener = c.wl_registry_listener{
+    .global = (struct {
+        fn registry_global(
+            data: ?*anyopaque,
+            wl_registry: ?*c.wl_registry,
+            name: u32,
+            interface: [*c]const u8,
+            version: u32,
+        ) callconv(.C) void {
+            const state: *State = @alignCast(@ptrCast(data));
+
+            const handles: []const struct {
+                interface: *const c.wl_interface,
+                version: u32,
+                ptr: *?*anyopaque,
+            } = &.{
+                .{ .interface = &c.wl_compositor_interface, .version = 4, .ptr = @as(*?*anyopaque, @ptrCast(&state.compositor)) },
+                .{ .interface = &c.wl_seat_interface, .version = 6, .ptr = @as(*?*anyopaque, @ptrCast(&state.seat)) },
+                .{ .interface = &c.wl_shm_interface, .version = 1, .ptr = @as(*?*anyopaque, @ptrCast(&state.wshm)) },
+                // .{ .interface = &c.xdg_wm_base_interface, .version = 2, .ptr = @as(*?*anyopaque, @ptrCast(&state.wm_base)) },
+            };
+
+            for (handles) |handle| {
+                if (std.mem.orderZ(u8, interface, handle.interface.name) == .eq) {
+                    // std.debug.print("connection to {s} (v{}) at verison {}\n", .{ std.mem.span(interface), version, handle.version });
+                    std.debug.assert(version >= handle.version);
+                    handle.ptr.* = c.wl_registry_bind(wl_registry, name, handle.interface, handle.version);
+                }
+            }
+        }
+    }.registry_global),
+    .global_remove = (struct {
+        fn global_remove(_: ?*anyopaque, _: ?*c.wl_registry, id: u32) callconv(.C) void {
+            // Who cares
+            std.debug.print("Got a registry losing event for {}\n", .{id});
+        }
+    }.global_remove),
+};
+
 pub const Renderer = struct {
     const Self = @This();
 
@@ -39,9 +84,12 @@ pub const Renderer = struct {
     dt: [5]i64,
     dt_index: usize,
 
-    pub fn init(alloc: *std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atlas) !Self {
+    alloc: std.mem.Allocator,
+
+    pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atlas) !Self {
         var arena = std.heap.ArenaAllocator.init(alloc);
-        const tmp_alloc: *std.mem.Allocator = &arena.allocator;
+        var all = arena.allocator();
+        const tmp_alloc: *std.mem.Allocator = &all;
         defer arena.deinit();
 
         // Extract the WGPU Surface from the platform-specific window
@@ -55,7 +103,7 @@ pub const Renderer = struct {
             const darwin = @import("darwin.zig");
 
             const cocoa_window = darwin.glfwGetCocoaWindow(window);
-            const ns_window = @ptrCast(c.id, @alignCast(8, cocoa_window));
+            const ns_window = @as(c.id, @ptrCast(@as(8, @alignCast(cocoa_window))));
 
             const cv = objc.call(ns_window, "contentView");
             _ = objc.call_(cv, "setWantsLayer:", true);
@@ -67,14 +115,35 @@ pub const Renderer = struct {
 
             break :surf c.wgpu_create_surface_from_metal_layer(metal_layer);
         } else {
-            std.debug.panic("Unimplemented on platform {}", .{platform});
+            // const display = c.wl_display_connect(null).?;
+            //
+            // const registry = c.wl_display_get_registry(display).?;
+            //
+            // const state = try alloc.create(State);
+            // state.* = State{
+            //     .compositor = null,
+            //     .seat = null,
+            //     .wshm = null,
+            //     // .wm_base = null,
+            // };
+            // _ = c.wl_registry_add_listener(registry, &wl_registry_listener, state);
+            //
+            // _ = c.wl_display_roundtrip(display);
+            //
+            // if (state.compositor == null) {
+            //     std.debug.panic("Compositor not found", .{});
+            // }
+            // const surface = c.wl_compositor_create_surface(state.compositor); // important
+
+            // break :surf c.wgpu_create_surface_from_wayland(surface, display);
+            std.debug.panic("Wayland not supported", .{});
         };
 
         ////////////////////////////////////////////////////////////////////////////
         // WGPU initial setup
         var adapter: c.WGPUAdapterId = 0;
         c.wgpu_request_adapter_async(&(c.WGPURequestAdapterOptions){
-            .power_preference = c.WGPUPowerPreference._HighPerformance,
+            .power_preference = c.WGPUPowerPreference_HighPerformance,
             .compatible_surface = surface,
         }, 2 | 4 | 8, false, adapter_cb, &adapter);
 
@@ -113,8 +182,8 @@ pub const Renderer = struct {
         ////////////////////////////////////////////////////////////////////////////
         // Upload the font atlas texture
         const tex_size = (c.WGPUExtent3d){
-            .width = @intCast(u32, font.tex_size),
-            .height = @intCast(u32, font.tex_size),
+            .width = @as(u32, font.tex_size),
+            .height = @as(u32, font.tex_size),
             .depth = 1,
         };
 
@@ -124,8 +193,8 @@ pub const Renderer = struct {
                 .size = tex_size,
                 .mip_level_count = 1,
                 .sample_count = 1,
-                .dimension = c.WGPUTextureDimension._D2,
-                .format = c.WGPUTextureFormat._Rgba8Unorm,
+                .dimension = c.WGPUTextureDimension_D2,
+                .format = c.WGPUTextureFormat_Rgba8Unorm,
                 // SAMPLED tells wgpu that we want to use this texture in shaders
                 // COPY_DST means that we want to copy data to this texture
                 .usage = c.WGPUTextureUsage_SAMPLED | c.WGPUTextureUsage_COPY_DST,
@@ -137,9 +206,9 @@ pub const Renderer = struct {
             tex,
             &(c.WGPUTextureViewDescriptor){
                 .label = "font_atlas_view",
-                .dimension = c.WGPUTextureViewDimension._D2,
-                .format = c.WGPUTextureFormat._Rgba8Unorm,
-                .aspect = c.WGPUTextureAspect._All,
+                .dimension = c.WGPUTextureViewDimension_D2,
+                .format = c.WGPUTextureFormat_Rgba8Unorm,
+                .aspect = c.WGPUTextureAspect_All,
                 .base_mip_level = 0,
                 .level_count = 1,
                 .base_array_layer = 0,
@@ -152,15 +221,15 @@ pub const Renderer = struct {
             &(c.WGPUSamplerDescriptor){
                 .next_in_chain = null,
                 .label = "font_atlas_sampler",
-                .address_mode_u = c.WGPUAddressMode._ClampToEdge,
-                .address_mode_v = c.WGPUAddressMode._ClampToEdge,
-                .address_mode_w = c.WGPUAddressMode._ClampToEdge,
-                .mag_filter = c.WGPUFilterMode._Linear,
-                .min_filter = c.WGPUFilterMode._Nearest,
-                .mipmap_filter = c.WGPUFilterMode._Nearest,
+                .address_mode_u = c.WGPUAddressMode_ClampToEdge,
+                .address_mode_v = c.WGPUAddressMode_ClampToEdge,
+                .address_mode_w = c.WGPUAddressMode_ClampToEdge,
+                .mag_filter = c.WGPUFilterMode_Linear,
+                .min_filter = c.WGPUFilterMode_Nearest,
+                .mipmap_filter = c.WGPUFilterMode_Nearest,
                 .lod_min_clamp = 0.0,
-                .lod_max_clamp = std.math.f32_max,
-                .compare = c.WGPUCompareFunction._Undefined,
+                .lod_max_clamp = std.math.floatMax(f32),
+                .compare = c.WGPUCompareFunction_Undefined,
             },
         );
 
@@ -192,12 +261,10 @@ pub const Renderer = struct {
                 .binding = 0,
                 .visibility = c.WGPUShaderStage_FRAGMENT,
                 .ty = c.WGPUBindingType_SampledTexture,
-
                 .multisampled = false,
-                .view_dimension = c.WGPUTextureViewDimension._D2,
-                .texture_component_type = c.WGPUTextureComponentType._Uint,
-                .storage_texture_format = c.WGPUTextureFormat._Rgba8Unorm,
-
+                .view_dimension = c.WGPUTextureViewDimension_D2,
+                .texture_component_type = c.WGPUTextureComponentType_Uint,
+                .storage_texture_format = c.WGPUTextureFormat_Rgba8Unorm,
                 .count = undefined,
                 .has_dynamic_offset = undefined,
                 .min_buffer_binding_size = undefined,
@@ -206,7 +273,6 @@ pub const Renderer = struct {
                 .binding = 1,
                 .visibility = c.WGPUShaderStage_FRAGMENT,
                 .ty = c.WGPUBindingType_Sampler,
-
                 .multisampled = undefined,
                 .view_dimension = undefined,
                 .texture_component_type = undefined,
@@ -219,10 +285,8 @@ pub const Renderer = struct {
                 .binding = 2,
                 .visibility = c.WGPUShaderStage_VERTEX | c.WGPUShaderStage_FRAGMENT,
                 .ty = c.WGPUBindingType_UniformBuffer,
-
                 .has_dynamic_offset = false,
                 .min_buffer_binding_size = 0,
-
                 .multisampled = undefined,
                 .view_dimension = undefined,
                 .texture_component_type = undefined,
@@ -233,10 +297,8 @@ pub const Renderer = struct {
                 .binding = 3,
                 .visibility = c.WGPUShaderStage_VERTEX,
                 .ty = c.WGPUBindingType_StorageBuffer,
-
                 .has_dynamic_offset = false,
                 .min_buffer_binding_size = 0,
-
                 .multisampled = undefined,
                 .view_dimension = undefined,
                 .texture_component_type = undefined,
@@ -260,7 +322,6 @@ pub const Renderer = struct {
                 .texture_view = tex_view,
                 .sampler = 0, // None
                 .buffer = 0, // None
-
                 .offset = undefined,
                 .size = undefined,
             },
@@ -269,7 +330,6 @@ pub const Renderer = struct {
                 .sampler = tex_sampler,
                 .texture_view = 0, // None
                 .buffer = 0, // None
-
                 .offset = undefined,
                 .size = undefined,
             },
@@ -278,7 +338,6 @@ pub const Renderer = struct {
                 .buffer = uniform_buffer,
                 .offset = 0,
                 .size = @sizeOf(c.fpUniforms),
-
                 .sampler = 0, // None
                 .texture_view = 0, // None
             },
@@ -287,7 +346,6 @@ pub const Renderer = struct {
                 .buffer = char_grid_buffer,
                 .offset = 0,
                 .size = @sizeOf(u32) * 512 * 512,
-
                 .sampler = 0, // None
                 .texture_view = 0, // None
             },
@@ -327,31 +385,31 @@ pub const Renderer = struct {
                     .entry_point = "main",
                 },
                 .rasterization_state = &(c.WGPURasterizationStateDescriptor){
-                    .front_face = c.WGPUFrontFace._Ccw,
-                    .cull_mode = c.WGPUCullMode._None,
+                    .front_face = c.WGPUFrontFace_Ccw,
+                    .cull_mode = c.WGPUCullMode_None,
                     .depth_bias = 0,
                     .depth_bias_slope_scale = 0.0,
                     .depth_bias_clamp = 0.0,
                 },
-                .primitive_topology = c.WGPUPrimitiveTopology._TriangleList,
+                .primitive_topology = c.WGPUPrimitiveTopology_TriangleList,
                 .color_states = &(c.WGPUColorStateDescriptor){
-                    .format = c.WGPUTextureFormat._Bgra8Unorm,
+                    .format = c.WGPUTextureFormat_Bgra8Unorm,
                     .alpha_blend = (c.WGPUBlendDescriptor){
-                        .src_factor = c.WGPUBlendFactor._One,
-                        .dst_factor = c.WGPUBlendFactor._Zero,
-                        .operation = c.WGPUBlendOperation._Add,
+                        .src_factor = c.WGPUBlendFactor_One,
+                        .dst_factor = c.WGPUBlendFactor_Zero,
+                        .operation = c.WGPUBlendOperation_Add,
                     },
                     .color_blend = (c.WGPUBlendDescriptor){
-                        .src_factor = c.WGPUBlendFactor._One,
-                        .dst_factor = c.WGPUBlendFactor._Zero,
-                        .operation = c.WGPUBlendOperation._Add,
+                        .src_factor = c.WGPUBlendFactor_One,
+                        .dst_factor = c.WGPUBlendFactor_Zero,
+                        .operation = c.WGPUBlendOperation_Add,
                     },
                     .write_mask = c.WGPUColorWrite_ALL,
                 },
                 .color_states_length = 1,
                 .depth_stencil_state = null,
                 .vertex_state = (c.WGPUVertexStateDescriptor){
-                    .index_format = c.WGPUIndexFormat._Uint16,
+                    .index_format = c.WGPUIndexFormat_Uint16,
                     .vertex_buffers = null,
                     .vertex_buffers_length = 0,
                 },
@@ -424,8 +482,8 @@ pub const Renderer = struct {
 
     pub fn update_font_tex(self: *Self, font: *const ft.Atlas) void {
         const tex_size = (c.WGPUExtent3d){
-            .width = @intCast(u32, font.tex_size),
-            .height = @intCast(u32, font.tex_size),
+            .width = @as(u32, font.tex_size),
+            .height = @as(u32, font.tex_size),
             .depth = 1,
         };
         c.wgpu_queue_write_texture(
@@ -435,12 +493,12 @@ pub const Renderer = struct {
                 .mip_level = 0,
                 .origin = (c.WGPUOrigin3d){ .x = 0, .y = 0, .z = 0 },
             },
-            @ptrCast([*]const u8, font.tex.ptr),
+            @as([*]const u8, @ptrCast(font.tex.ptr)),
             font.tex.len * @sizeOf(u32),
             &(c.WGPUTextureDataLayout){
                 .offset = 0,
-                .bytes_per_row = @intCast(u32, font.tex_size) * @sizeOf(u32),
-                .rows_per_image = @intCast(u32, font.tex_size) * @sizeOf(u32),
+                .bytes_per_row = @as(u32, font.tex_size) * @sizeOf(u32),
+                .rows_per_image = @as(u32, font.tex_size) * @sizeOf(u32),
             },
             &tex_size,
         );
@@ -477,8 +535,8 @@ pub const Renderer = struct {
                 .attachment = next_texture.view_id,
                 .resolve_target = 0,
                 .channel = (c.WGPUPassChannel_Color){
-                    .load_op = c.WGPULoadOp._Clear,
-                    .store_op = c.WGPUStoreOp._Store,
+                    .load_op = c.WGPULoadOp_Clear,
+                    .store_op = c.WGPUStoreOp_Store,
                     .clear_value = (c.WGPUColor){
                         .r = 0.0,
                         .g = 0.0,
@@ -517,8 +575,8 @@ pub const Renderer = struct {
         self.dt_index = (self.dt_index + 1) % self.dt.len;
 
         var dt_local = self.dt;
-        comptime const asc = std.sort.asc(i64);
-        std.sort.sort(i64, dt_local[0..], {}, asc);
+        const asc = comptime std.sort.asc(i64);
+        std.mem.sort(i64, dt_local[0..], {}, asc);
         const dt = dt_local[self.dt.len / 2];
 
         if (dt > 33) {
@@ -552,7 +610,7 @@ pub const Renderer = struct {
             self.queue,
             self.char_grid_buffer,
             0,
-            @ptrCast([*c]const u8, char_grid.ptr),
+            @as([*c]const u8, @ptrCast(char_grid.ptr)),
             char_grid.len * @sizeOf(u32),
         );
     }
@@ -563,10 +621,10 @@ pub const Renderer = struct {
             self.surface,
             &(c.WGPUSwapChainDescriptor){
                 .usage = c.WGPUTextureUsage_OUTPUT_ATTACHMENT,
-                .format = c.WGPUTextureFormat._Bgra8Unorm,
+                .format = c.WGPUTextureFormat_Bgra8Unorm,
                 .width = width,
                 .height = height,
-                .present_mode = c.WGPUPresentMode._Fifo,
+                .present_mode = c.WGPUPresentMode_Fifo,
             },
         );
 
@@ -585,12 +643,12 @@ pub const Renderer = struct {
             self.queue,
             self.uniform_buffer,
             0,
-            @ptrCast([*c]const u8, u),
+            @as([*c]const u8, @ptrCast(u)),
             @sizeOf(c.fpUniforms),
         );
     }
 };
 
-export fn adapter_cb(received: c.WGPUAdapterId, data: ?*c_void) void {
-    @ptrCast(*c.WGPUAdapterId, @alignCast(8, data)).* = received;
+export fn adapter_cb(received: c.WGPUAdapterId, data: ?*anyopaque) void {
+    @as(*c.WGPUAdapterId, @ptrCast(@alignCast(data))).* = received;
 }

@@ -15,8 +15,8 @@ pub const Window = struct {
             return Window{ .window = w };
         } else {
             var err_str: [*c]u8 = null;
-            const err = c.glfwGetError(&err_str);
-            std.debug.panic("Failed to open window: {} ({})", .{ err, err_str });
+            const err = c.glfwGetError(@ptrCast(&err_str));
+            std.debug.panic("Failed to open window: {?} ({*})", .{ err, err_str });
         }
     }
 
@@ -31,7 +31,7 @@ pub const Window = struct {
     pub fn get_window_width(self: *Self) u32 {
         var w_width: c_int = undefined;
         c.glfwGetWindowSize(self.window, &w_width, null);
-        return @intCast(u32, w_width);
+        return @as(u32, @intCast(w_width));
     }
 
     pub fn set_callbacks(
@@ -41,7 +41,7 @@ pub const Window = struct {
         mouse_button_cb: c.GLFWmousebuttonfun,
         mouse_pos_cb: c.GLFWcursorposfun,
         scroll_cb: c.GLFWscrollfun,
-        data: ?*c_void,
+        data: ?*anyopaque,
     ) void {
         // Attach the TUI handle to the window so we can extract it
         _ = c.glfwSetWindowUserPointer(self.window, data);
