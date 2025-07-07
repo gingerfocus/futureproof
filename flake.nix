@@ -23,6 +23,7 @@
           glfw
           valgrind
           wayland
+          wgpu-utils
 
           # Development
           alejandra

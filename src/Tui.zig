@@ -672,7 +672,7 @@ fn rebuild_preview(self: *Self, buf_num: u32, shader_text: []const u8) !void {
 }
 
 pub fn run(self: *Self) !void {
-    while (!self.window.should_close() and (try self.tick())) {
+    while (!self.window.closing() and (try self.tick())) {
         c.glfwWaitEvents();
     }
 
@@ -684,49 +684,51 @@ pub fn update_size(self: *Self, width: c_int, height: c_int) void {
     self.u.width_px = @as(u32, @intCast(width));
     self.u.height_px = @as(u32, @intCast(height));
 
-    const density = self.u.width_px / self.window.get_window_width();
-    if (density != self.pixel_density) {
-        self.pixel_density = density;
-
-        self.font.deinit();
-        self.font = FtAtlas.build_atlas(
-            self.alloc,
-            FONT_NAME,
-            FONT_SIZE * self.pixel_density,
-            512,
-        ) catch |err| {
-            std.debug.panic("Could not rebuild font: {}\n", .{err});
-        };
-        self.u.font = self.font.u;
-        // self.renderer.update_font_tex(&self.font);
-    }
-
-    const cursor_x = self.char_grid[self.total_tiles];
-    const cursor_y = self.char_grid[self.total_tiles + 1];
-
-    self.x_tiles = self.u.width_px / self.u.font.glyph_advance / 2;
-    self.y_tiles = self.u.height_px / self.u.font.glyph_height;
-    self.total_tiles = self.x_tiles * self.y_tiles;
-
     self.renderer.resize(self.u.width_px, self.u.height_px);
     // self.renderer.update_uniforms(&self.u);
 
-    self.rpc.call_release(
-        "nvim_ui_try_resize",
-        .{ self.x_tiles, self.y_tiles },
-    ) catch |err| {
-        std.debug.panic("Failed to resize UI: {}\n", .{err});
-    };
+    if (false) {
+        const density = self.u.width_px / self.window.getWidth();
+        if (density != self.pixel_density) {
+            self.pixel_density = density;
 
-    self.char_grid[self.total_tiles] = cursor_x;
-    self.char_grid[self.total_tiles + 1] = cursor_y;
+            self.font.deinit();
+            self.font = FtAtlas.build_atlas(
+                self.alloc,
+                FONT_NAME,
+                FONT_SIZE * self.pixel_density,
+                512,
+            ) catch |err| {
+                std.debug.panic("Could not rebuild font: {}\n", .{err});
+            };
+            self.u.font = self.font.u;
+            self.renderer.update_font_tex(&self.font);
+        }
 
-    const r = self.tick() catch |err| {
-        std.debug.panic("Failed to tick: {}\n", .{err});
-    };
+        const cursor_x = self.char_grid[self.total_tiles];
+        const cursor_y = self.char_grid[self.total_tiles + 1];
 
-    // Resizing the window shouldn't ever cause the nvim process to exit
-    std.debug.assert(r);
+        self.x_tiles = self.u.width_px / self.u.font.glyph_advance / 2;
+        self.y_tiles = self.u.height_px / self.u.font.glyph_height;
+        self.total_tiles = self.x_tiles * self.y_tiles;
+
+        self.rpc.call_release(
+            "nvim_ui_try_resize",
+            .{ self.x_tiles, self.y_tiles },
+        ) catch |err| {
+            std.debug.panic("Failed to resize UI: {}\n", .{err});
+        };
+
+        self.char_grid[self.total_tiles] = cursor_x;
+        self.char_grid[self.total_tiles + 1] = cursor_y;
+
+        const r = self.tick() catch |err| {
+            std.debug.panic("Failed to tick: {}\n", .{err});
+        };
+
+        // Resizing the window shouldn't ever cause the nvim process to exit
+        std.debug.assert(r);
+    }
 }
 
 fn get_ascii_lower(key: c_int) ?u8 {

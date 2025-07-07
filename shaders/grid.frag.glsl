@@ -1,7 +1,62 @@
 #version 450
 #pragma shader_stage(fragment)
 #extension GL_EXT_scalar_block_layout : require
-#include "extern/futureproof.h"
+
+// ----------------------------------------------------------------------------
+
+#define uint32_t uint
+#define int32_t int
+#define MEMBER_STRUCT
+
+struct fpGlyph {
+    uint32_t x0, y0, width, height;
+    int32_t x_offset, y_offset;
+};
+struct fpAtlasUniforms {
+    MEMBER_STRUCT fpGlyph glyphs[256];
+    uint32_t glyph_height;
+    uint32_t glyph_advance;
+};
+
+#define FP_FLAG_BOLD          (1 << 0)
+#define FP_FLAG_ITALIC        (1 << 1)
+#define FP_FLAG_REVERSE       (1 << 2)
+#define FP_FLAG_UNDERCURL     (1 << 3)
+#define FP_FLAG_UNDERLINE     (1 << 4)
+#define FP_FLAG_STRIKETHROUGH (1 << 5)
+#define FP_FLAG_STANDOUT      (1 << 6)
+
+struct fpHlAttrs {
+    uint32_t foreground;
+    uint32_t background;
+    uint32_t special;
+    uint32_t flags; // Set of FP_FLAGs above
+};
+#define FP_CURSOR_BLOCK 0
+#define FP_CURSOR_VERTICAL 1
+#define FP_CURSOR_HORIZONTAL 2
+struct fpMode {
+    uint32_t cursor_shape; // One of the FP_CURSORs above
+    uint32_t cell_percentage;
+
+    uint32_t blinkwait;
+    uint32_t blinkon;
+    uint32_t blinkoff;
+
+    uint32_t attr_id;
+};
+
+#define FP_MAX_MODES 32
+#define FP_MAX_ATTRS 256
+struct fpUniforms {
+    uint32_t width_px;
+    uint32_t height_px;
+    fpAtlasUniforms font;
+    fpHlAttrs attrs[FP_MAX_ATTRS];
+    fpMode modes[FP_MAX_MODES];
+};
+
+// ----------------------------------------------------------------------------
 
 layout(location=0) in vec2 v_tex_coords;
 layout(location=1) in vec2 v_cell_coords;
@@ -13,9 +68,7 @@ layout(location=0) out vec4 out_color;
 
 layout(set=0, binding=0) uniform texture2D font_tex;
 layout(set=0, binding=1) uniform sampler font_sampler;
-layout(set=0, binding=2, std430) uniform Uniforms {
-    fpUniforms u;
-};
+layout(set=0, binding=2) uniform fpUniforms u;
 
 const vec3 GAMMA = vec3(1/2.2);
 

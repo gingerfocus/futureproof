@@ -15,12 +15,12 @@ queue: *wgpu.Queue,
 // copy to tex[1] to render the complete image without tearing
 tex: [2]*wgpu.Texture,
 tex_view: [2]*wgpu.TextureView,
-// tex_size: c.WGPUExtent3d,
-//
+tex_size: wgpu.Extent3D,
+
 bind_group: *wgpu.BindGroup,
 uniform_buffer: *wgpu.Buffer,
 render_pipeline: *wgpu.RenderPipeline,
-//
+
 start_time: i64,
 previewuniforms: ext.PreviewUniforms,
 draw_continuously: bool,
@@ -28,29 +28,21 @@ draw_continuously: bool,
 pub fn init(
     alloc: std.mem.Allocator,
     device: *wgpu.Device,
-    frag: []const u32,
+    wgsl: []const u8,
     draw_continuously: bool,
 ) !Self {
+    _ = alloc;
+
     // var arena = std.heap.ArenaAllocator.init(alloc.*);
     // var all = arena.allocator();
     // const tmp_alloc: *std.mem.Allocator = &all;
     // defer arena.deinit();
 
     // Build the shaders using shaderc
-    const vert_spv = shaderc.build_shader_from_file(alloc, "shaders/preview.vert") catch {
-        std.debug.panic("Could not build preview.vert", .{});
-    };
-    const vert_shader = device.createShaderModuleSpirV(&.{
-        .source = vert_spv.ptr,
-        .source_size = @intCast(vert_spv.len),
-    }).?;
-    defer vert_shader.release();
-
-    const frag_shader = device.createShaderModuleSpirV(&.{
-        .source = frag.ptr,
-        .source_size = @intCast(frag.len),
-    }).?;
-    defer frag_shader.release();
+    const shader = device.createShaderModule(wgpu.shaderModuleWGSLDescriptor(&.{
+        .code = wgsl,
+    })).?;
+    defer shader.release();
 
     ////////////////////////////////////////////////////////////////////////////////
     // Uniform buffers
@@ -116,30 +108,20 @@ pub fn init(
     const render_pipeline = device.createRenderPipeline(&wgpu.RenderPipelineDescriptor{
         .layout = pipeline_layout,
         .vertex = (wgpu.VertexState){
-            .module = vert_shader,
-            .entry_point = wgpu.StringView.fromSlice("main"),
+            .module = shader,
+            .entry_point = wgpu.StringView.fromSlice("vs_main"),
         },
         .fragment = &(wgpu.FragmentState){
-            .module = frag_shader,
-            .entry_point = wgpu.StringView.fromSlice("main"),
+            .module = shader,
+            .entry_point = wgpu.StringView.fromSlice("fs_main"),
             .target_count = 1,
             .targets = &[1]wgpu.ColorTargetState{
                 wgpu.ColorTargetState{
                     .format = wgpu.TextureFormat.rgba8_unorm,
-                    // .color_states = &(wgpu.WGPUColorStateDescriptor){
-                    //     .format = wgpu.WGPUTextureFormat_Bgra8Unorm,
-                    //     .alpha_blend = (wgpu.WGPUBlendDescriptor){
-                    //         .src_factor = wgpu.WGPUBlendFactor_One,
-                    //         .dst_factor = wgpu.WGPUBlendFactor_Zero,
-                    //         .operation = wgpu.WGPUBlendOperation_Add,
-                    //     },
-                    //     .color_blend = (wgpu.WGPUBlendDescriptor){
-                    //         .src_factor = wgpu.WGPUBlendFactor_One,
-                    //         .dst_factor = wgpu.WGPUBlendFactor_Zero,
-                    //         .operation = wgpu.WGPUBlendOperation_Add,
-                    //     },
-                    //     .write_mask = wgpu.WGPUColorWrite_ALL,
-                    // },
+                    .blend = &(wgpu.BlendState){
+                        .alpha = wgpu.BlendComponent{},
+                        .color = wgpu.BlendComponent{},
+                    },
                 },
             },
         },
@@ -174,7 +156,7 @@ pub fn init(
         // Assigned in set_size below
         .tex = undefined,
         .tex_view = undefined,
-        // .tex_size = undefined,
+        .tex_size = undefined,
 
         .previewuniforms = .{
             .iResolution = .{ .x = 0, .y = 0, .z = 0 },
@@ -187,16 +169,15 @@ pub fn init(
 }
 
 fn destroy_textures(self: *const Self) void {
-    _ = self;
     // If the texture was created, then destroy it
-    // if (self.uniforms.iResolution.x != 0) {
-    //     for (self.tex) |t| {
-    //         wgpu.wgpu_texture_destroy(t);
-    //     }
-    //     for (self.tex_view) |t| {
-    //         wgpu.wgpu_texture_view_destroy(t);
-    //     }
-    // }
+    if (self.uniforms.iResolution.x != 0) {
+        for (self.tex) |t| {
+            t.destroy();
+        }
+        for (self.tex_view) |t| {
+            t.release();
+        }
+    }
 }
 
 pub fn adjust_tiles(self: *Self, dt: i64) void {
@@ -227,15 +208,13 @@ pub fn deinit(self: *const Self) void {
 }
 
 pub fn set_size(self: *Self, width: u32, height: u32) void {
-    _ = width;
-    _ = height;
     self.destroy_textures();
 
-    // self.tex_size = (wgpu.WGPUExtent3d){
-    //     .width = @as(u32, width / 2),
-    //     .height = @as(u32, height),
-    //     .depth = 1,
-    // };
+    self.tex_size = wgpu.Extent3D{
+        .width = @as(u32, width / 2),
+        .height = @as(u32, height),
+        .depth_or_array_layers = 1,
+    };
 
     // var i: u8 = 0;
     // while (i < 2) : (i += 1) {
@@ -329,31 +308,26 @@ pub fn redraw(self: *Self) void {
     rpass.end();
 
     // Move on to the next tile
-    // if (self.previewuniforms._tiles_per_side > 1) {
-    //     self.previewuniforms._tile_num += 1;
-    // }
-    //
-    // // If we just finished rendering every tile, then also copy
-    // // to the deployment tex
-    // if (self.previewuniforms._tile_num == std.math.pow(u32, self.previewuniforms._tiles_per_side, 2)) {
-    //     const src = (wgpu.TextureCopyView){
-    //         .texture = self.tex[0],
-    //         .mip_level = 0,
-    //         .origin = (wgpu.WGPUOrigin3d){ .x = 0, .y = 0, .z = 0 },
-    //     };
-    //     const dst = (wgpu.WGPUTextureCopyView){
-    //         .texture = self.tex[1],
-    //         .mip_level = 0,
-    //         .origin = (wgpu.WGPUOrigin3d){ .x = 0, .y = 0, .z = 0 },
-    //     };
-    //     wgpu.wgpu_command_encoder_copy_texture_to_texture(
-    //         cmd_encoder,
-    //         &src,
-    //         &dst,
-    //         &self.tex_size,
-    //     );
-    //     self.previewuniforms._tile_num = 0;
-    // }
+    if (self.previewuniforms._tiles_per_side > 1) {
+        self.previewuniforms._tile_num += 1;
+    }
+
+    // If we just finished rendering every tile, then also copy
+    // to the deployment tex
+    if (self.previewuniforms._tile_num == std.math.pow(u32, self.previewuniforms._tiles_per_side, 2)) {
+        const src = (wgpu.TextureCopyView){
+            .texture = self.tex[0],
+            .mip_level = 0,
+            .origin = (wgpu.WGPUOrigin3d){ .x = 0, .y = 0, .z = 0 },
+        };
+        const dst = (wgpu.WGPUTextureCopyView){
+            .texture = self.tex[1],
+            .mip_level = 0,
+            .origin = (wgpu.WGPUOrigin3d){ .x = 0, .y = 0, .z = 0 },
+        };
+        cmd_encoder.copyBufferToTexture(&src, &dst, &self.tex_size);
+        self.previewuniforms._tile_num = 0;
+    }
 
     const cmd_buf = cmd_encoder.finish(null).?;
     self.queue.submit(&.{cmd_buf});
