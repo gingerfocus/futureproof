@@ -88,18 +88,19 @@ export fn include_release_cb(user_data: ?*anyopaque, include_result: ?*c.shaderc
     }
 }
 
-pub fn build_shader_from_file(alloc: *std.mem.Allocator, comptime name: []const u8) ![]u32 {
+pub fn build_shader_from_file(alloc: std.mem.Allocator, comptime name: []const u8) ![]u32 {
     const buf = try util.file_contents(alloc, name);
     return build_shader(alloc, name, buf);
 }
 
-pub fn build_shader(alloc: *std.mem.Allocator, name: []const u8, src: []const u8) ![]u32 {
+pub fn build_shader(argalloc: std.mem.Allocator, name: []const u8, src: []const u8) ![]u32 {
+    var alloc = argalloc;
     const compiler = c.shaderc_compiler_initialize();
     defer c.shaderc_compiler_release(compiler);
 
     const options = c.shaderc_compile_options_initialize();
     defer c.shaderc_compile_options_release(options);
-    c.shaderc_compile_options_set_include_callbacks(options, include_cb, include_release_cb, alloc);
+    c.shaderc_compile_options_set_include_callbacks(options, include_cb, include_release_cb, &alloc);
 
     const result = c.shaderc_compile_into_spv(
         compiler,
@@ -171,7 +172,7 @@ pub fn build_preview_shader(
     var tmp_alloc: *std.mem.Allocator = &all;
     defer arena.deinit();
     const prelude = try util.file_contents(
-        tmp_alloc,
+        all,
         "shaders/preview.prelude.frag",
     );
 

@@ -6,10 +6,15 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "futureproof",
-        .root_source_file = b.path("src/main.zig"),
+        // .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/tri.zig"),
         .target = target,
         .optimize = optimize,
     });
+    // exe.addCSourceFile(.{
+    //     .file = b.path("vendor/glfw3webgpu/glfw3webgpu.c"),
+    // });
+    // exe.addIncludePath(b.path("vendor/glfw3webgpu"));
 
     exe.linkLibC();
     exe.linkLibCpp();
@@ -19,13 +24,19 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary2("freetype2", .{});
     exe.linkSystemLibrary2("stdc++", .{}); // needed for shaderc
 
-    // exe.addLibraryPath(b.path("vendor/wgpu/lib"));
+    // --------- wgpu -----------------------------------------
+    // exe.addLibraryPath(b.path("vendor/wgpu"));
     // exe.linkSystemLibrary("wgpu_native");
-    // exe.addIncludePath(b.path("vendor/wgpu/include")); // "wgpu/wgpu.h" is the wgpu header
-    //
-    exe.addLibraryPath(b.path("vendor/wgpu"));
-    exe.linkSystemLibrary("wgpu_native");
-    exe.addIncludePath(b.path("vendor")); // "wgpu/wgpu.h" is the wgpu header
+    // exe.addIncludePath(b.path("vendor"));
+
+    const wgpu = b.dependency("wgpu-native", .{
+        .target = target,
+        .optimize = optimize,
+        .link_mode = .static,
+    });
+    // exe.root_module.addImport("wgpu", wgpu.module("wgpu-c"));
+    exe.root_module.addImport("wgpu", wgpu.module("wgpu"));
+    // ------------------------------------------------------
 
     // exe.addLibraryPath(b.path("vendor/shaderc/lib"));
     // exe.linkSystemLibrary("shaderc_combined");
@@ -33,8 +44,6 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary2("shaderc", .{});
 
     exe.addIncludePath(b.path(".")); // for "extern/futureproof.h"
-
-    exe.linkSystemLibrary2("wayland-client", .{});
 
     // This must come before the install_name_tool call below
     b.installArtifact(exe);
@@ -45,10 +54,14 @@ pub fn build(b: *std.Build) void {
     //     exe.linkFramework("AppKit");
     // }
 
-    // const run_cmd = exe.run();
-    // run_cmd.step.dependOn(b.getInstallStep());
-    // const run_step = b.step("run", "Run the app");
-    // run_step.dependOn(&run_cmd.step);
+    // ------------------------------------------------------
+
+    const run = b.addRunArtifact(exe);
+    if (b.args) |args| run.addArgs(args);
+    const step = b.step("run", "Run the app");
+    step.dependOn(&run.step);
+
+    // ------------------------------------------------------
 
     const check = b.step("check", "Lsp Check Step");
     check.dependOn(&exe.step);

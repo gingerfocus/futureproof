@@ -211,230 +211,227 @@ pub const Value = union(enum) {
 
     // out should implement the Writer interface
     pub fn serialize(self: Value, out: anytype) anyerror!void {
-        _ = self;
-        _ = out;
-        unreachable;
-        // switch (self) {
-        //     .Int => |i| {
-        //         switch (i) {
-        //             // Negative fixnum
-        //             -32...-1 => _ = try out.write(&@as([8]u8, std.mem.toBytes(i))),
-        //             // i8
-        //             0...std.math.maxInt(i8), std.math.minInt(i8)...-33 => {
-        //                 _ = try out.writeByte(0xd0);
-        //                 _ = try out.write(&@as([8]u8, std.mem.toBytes(i)));
-        //             },
-        //             // i16
-        //             (std.math.maxInt(i8) + 1)...std.math.maxInt(i16),
-        //             std.math.minInt(i16)...(std.math.minInt(i8) - 1),
-        //             => {
-        //                 _ = try out.writeByte(0xd1);
-        //                 const j = std.mem.nativeToBig(i16, @as(i16, i));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             // i32
-        //             (std.math.maxInt(i16) + 1)...std.math.maxInt(i32),
-        //             std.math.minInt(i32)...(std.math.minInt(i16) - 1),
-        //             => {
-        //                 _ = try out.writeByte(0xd2);
-        //                 const j = std.mem.nativeToBig(i32, @as(i32, i));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             // i64
-        //             (std.math.maxInt(i32) + 1)...std.math.maxInt(i64),
-        //             std.math.minInt(i64)...(std.math.minInt(i32) - 1),
-        //             => {
-        //                 _ = try out.writeByte(0xd3);
-        //                 const j = std.mem.nativeToBig(i64, @as(i64, i));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //         }
-        //     },
-        //
-        //     .UInt => |u| {
-        //         switch (u) {
-        //             // Positive fixnum
-        //             0x00...0x7f => _ = try out.write(&@as([8]u8, std.mem.toBytes(u))),
-        //             // u8
-        //             0x80...std.math.maxInt(u8) => {
-        //                 _ = try out.writeByte(0xcc);
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(@as(u8, u)));
-        //             },
-        //             // u16
-        //             (std.math.maxInt(u8) + 1)...std.math.maxInt(u16) => {
-        //                 _ = try out.writeByte(0xcd);
-        //                 const j = std.mem.nativeToBig(u16, @as(u16, u));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             // u32
-        //             (std.math.maxInt(u16) + 1)...std.math.maxInt(u32) => {
-        //                 _ = try out.writeByte(0xce);
-        //                 const j = std.mem.nativeToBig(u32, @as(u32, u));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             // u64
-        //             (std.math.maxInt(u32) + 1)...std.math.maxInt(u64) => {
-        //                 _ = try out.writeByte(0xcf);
-        //                 const j = std.mem.nativeToBig(u64, @as(u64, u));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //         }
-        //     },
-        //
-        //     .Nil => _ = try out.writeByte(0xc0),
-        //     .Boolean => |b| {
-        //         _ = try out.writeByte(if (b) 0xc3 else 0xc2);
-        //     },
-        //     .Float32 => |f| {
-        //         _ = try out.writeByte(0xca);
-        //         _ = try out.write(&@as([*]const u8, std.mem.toBytes(f)));
-        //     },
-        //     .Float64 => |d| {
-        //         _ = try out.writeByte(0xcb);
-        //         _ = try out.write(&@as([*]const u8, std.mem.toBytes(d)));
-        //     },
-        //
-        //     .RawString => |s| {
-        //         switch (s.len) {
-        //             0x00...0x1f => {
-        //                 _ = try out.writeByte(0b101_00000 | @as(u8, s.len));
-        //             },
-        //             0x20...std.math.maxInt(u8) => {
-        //                 _ = try out.writeByte(0xd9);
-        //                 _ = try out.writeByte(@as(u8, s.len));
-        //             },
-        //             std.math.maxInt(u8) + 1...std.math.maxInt(u16) => {
-        //                 _ = try out.writeByte(0xda);
-        //                 const j = std.mem.nativeToBig(u16, @as(u16, s.len));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
-        //                 _ = try out.writeByte(0xda);
-        //                 const j = std.mem.nativeToBig(u32, @as(u32, s.len));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             else => std.debug.panic(
-        //                 "String is too large: {} > {}\n",
-        //                 .{ s.len, std.math.maxInt(u32) },
-        //             ),
-        //         }
-        //         _ = try out.write(s);
-        //     },
-        //
-        //     .RawData => |d| {
-        //         switch (d.len) {
-        //             0x00...std.math.maxInt(u8) => {
-        //                 _ = try out.writeByte(0xc4);
-        //                 _ = try out.writeByte(@as(u8, d.len));
-        //             },
-        //             std.math.maxInt(u8) + 1...std.math.maxInt(u16) => {
-        //                 _ = try out.writeByte(0xc5);
-        //                 const j = std.mem.nativeToBig(u16, @as(u16, d.len));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
-        //                 _ = try out.writeByte(0xc6);
-        //                 const j = std.mem.nativeToBig(u32, @as(u32, d.len));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             else => std.debug.panic(
-        //                 "Data is too large: {} > {}\n",
-        //                 .{ d.len, std.math.maxInt(u32) },
-        //             ),
-        //         }
-        //         _ = try out.write(d);
-        //     },
-        //
-        //     .Array => |a| {
-        //         switch (a.len) {
-        //             0x00...0x0f => {
-        //                 _ = try out.writeByte(0b1001_0000 | @as(u8, a.len));
-        //             },
-        //             0x10...std.math.maxInt(u16) => {
-        //                 _ = try out.writeByte(0xdc);
-        //                 const j = std.mem.nativeToBig(u16, @as(u16, a.len));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
-        //                 _ = try out.writeByte(0xdd);
-        //                 const j = std.mem.nativeToBig(u32, @as(u32, a.len));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             else => std.debug.panic(
-        //                 "Array is too large: {} > {}\n",
-        //                 .{ a.len, std.math.maxInt(u32) },
-        //             ),
-        //         }
-        //         for (a) |v| {
-        //             try v.serialize(out);
-        //         }
-        //     },
-        //
-        //     .Map => |m| {
-        //         const count = m.count();
-        //         switch (count) {
-        //             0x00...0x0f => {
-        //                 _ = try out.writeByte(0b1000_0000 | @as(u8, count));
-        //             },
-        //             0x10...std.math.maxInt(u16) => {
-        //                 _ = try out.writeByte(0xde);
-        //                 const j = std.mem.nativeToBig(u16, @as(u16, count));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
-        //                 _ = try out.writeByte(0xdf);
-        //                 const j = std.mem.nativeToBig(u32, @as(u32, count));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //         }
-        //         var itr = m.iterator();
-        //         while (itr.next()) |entry| {
-        //             try entry.key.to_value().serialize(out);
-        //             try entry.value.serialize(out);
-        //         }
-        //     },
-        //
-        //     .Ext => |e| {
-        //         const count = e.data.len;
-        //         switch (count) {
-        //             0x01 => {
-        //                 _ = try out.writeByte(0xd4);
-        //             },
-        //             0x02 => {
-        //                 _ = try out.writeByte(0xd5);
-        //             },
-        //             0x04 => {
-        //                 _ = try out.writeByte(0xd6);
-        //             },
-        //             0x08 => {
-        //                 _ = try out.writeByte(0xd7);
-        //             },
-        //             0x10 => {
-        //                 _ = try out.writeByte(0xd8);
-        //             },
-        //
-        //             0x00, 0x03, 0x05...0x07, 0x09...0x0f, 0x11...0xff => {
-        //                 _ = try out.writeByte(0xc7);
-        //                 _ = try out.writeByte(@as(u8, count));
-        //             },
-        //             std.math.maxInt(u8) + 1...std.math.maxInt(u16) => {
-        //                 _ = try out.writeByte(0xc8);
-        //                 const j = std.mem.nativeToBig(u16, @as(u16, count));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
-        //                 _ = try out.writeByte(0xc9);
-        //                 const j = std.mem.nativeToBig(u32, @as(u32, count));
-        //                 _ = try out.write(&@as([*]const u8, std.mem.toBytes(j)));
-        //             },
-        //             std.math.maxInt(u32) + 1...std.math.maxInt(u64) => {
-        //                 std.debug.panic("Ext data is too large: {}\n", .{count});
-        //             },
-        //         }
-        //         _ = try out.writeByte(@as(u8, @bitCast(e.type)));
-        //         _ = try out.write(e.data);
-        //     },
-        // }
+        switch (self) {
+            .Int => |i| {
+                switch (i) {
+                    // Negative fixnum
+                    -32...-1 => _ = try out.write(&@as([8]u8, std.mem.toBytes(i))),
+                    // i8
+                    0...std.math.maxInt(i8), std.math.minInt(i8)...-33 => {
+                        _ = try out.writeByte(0xd0);
+                        _ = try out.write(&@as([8]u8, std.mem.toBytes(i)));
+                    },
+                    // i16
+                    (std.math.maxInt(i8) + 1)...std.math.maxInt(i16),
+                    std.math.minInt(i16)...(std.math.minInt(i8) - 1),
+                    => {
+                        _ = try out.writeByte(0xd1);
+                        const j = std.mem.nativeToBig(i16, @intCast(i));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    // i32
+                    (std.math.maxInt(i16) + 1)...std.math.maxInt(i32),
+                    std.math.minInt(i32)...(std.math.minInt(i16) - 1),
+                    => {
+                        _ = try out.writeByte(0xd2);
+                        const j = std.mem.nativeToBig(i32, @intCast(i));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    // i64
+                    (std.math.maxInt(i32) + 1)...std.math.maxInt(i64),
+                    std.math.minInt(i64)...(std.math.minInt(i32) - 1),
+                    => {
+                        _ = try out.writeByte(0xd3);
+                        const j = std.mem.nativeToBig(i64, @as(i64, i));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                }
+            },
+
+            .UInt => |u| {
+                switch (u) {
+                    // Positive fixnum
+                    0x00...0x7f => _ = try out.write(&@as([8]u8, std.mem.toBytes(u))),
+                    // u8
+                    0x80...std.math.maxInt(u8) => {
+                        _ = try out.writeByte(0xcc);
+                        _ = try out.write(&[1]u8{@intCast(u)});
+                    },
+                    // u16
+                    (std.math.maxInt(u8) + 1)...std.math.maxInt(u16) => {
+                        _ = try out.writeByte(0xcd);
+                        const j = std.mem.nativeToBig(u16, @intCast(u));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    // u32
+                    (std.math.maxInt(u16) + 1)...std.math.maxInt(u32) => {
+                        _ = try out.writeByte(0xce);
+                        const j = std.mem.nativeToBig(u32, @intCast(u));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    // u64
+                    (std.math.maxInt(u32) + 1)...std.math.maxInt(u64) => {
+                        _ = try out.writeByte(0xcf);
+                        const j = std.mem.nativeToBig(u64, @intCast(u));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                }
+            },
+
+            .Nil => _ = try out.writeByte(0xc0),
+            .Boolean => |b| {
+                _ = try out.writeByte(if (b) 0xc3 else 0xc2);
+            },
+            .Float32 => |f| {
+                _ = try out.writeByte(0xca);
+                _ = try out.write(&std.mem.toBytes(f));
+            },
+            .Float64 => |d| {
+                _ = try out.writeByte(0xcb);
+                _ = try out.write(&std.mem.toBytes(d));
+            },
+
+            .RawString => |s| {
+                switch (s.len) {
+                    0x00...0x1f => {
+                        _ = try out.writeByte(0b101_00000 | @as(u8, @intCast(s.len)));
+                    },
+                    0x20...std.math.maxInt(u8) => {
+                        _ = try out.writeByte(0xd9);
+                        _ = try out.writeByte(@intCast(s.len));
+                    },
+                    std.math.maxInt(u8) + 1...std.math.maxInt(u16) => {
+                        _ = try out.writeByte(0xda);
+                        const j = std.mem.nativeToBig(u16, @intCast(s.len));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
+                        _ = try out.writeByte(0xda);
+                        const j = std.mem.nativeToBig(u32, @intCast(s.len));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    else => std.debug.panic(
+                        "String is too large: {} > {}\n",
+                        .{ s.len, std.math.maxInt(u32) },
+                    ),
+                }
+                _ = try out.write(s);
+            },
+
+            .RawData => |d| {
+                switch (d.len) {
+                    0x00...std.math.maxInt(u8) => {
+                        _ = try out.writeByte(0xc4);
+                        _ = try out.writeByte(@intCast(d.len));
+                    },
+                    std.math.maxInt(u8) + 1...std.math.maxInt(u16) => {
+                        _ = try out.writeByte(0xc5);
+                        const j = std.mem.nativeToBig(u16, @intCast(d.len));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
+                        _ = try out.writeByte(0xc6);
+                        const j = std.mem.nativeToBig(u32, @intCast(d.len));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    else => std.debug.panic(
+                        "Data is too large: {} > {}\n",
+                        .{ d.len, std.math.maxInt(u32) },
+                    ),
+                }
+                _ = try out.write(d);
+            },
+
+            .Array => |a| {
+                switch (a.len) {
+                    0x00...0x0f => {
+                        _ = try out.writeByte(0b1001_0000 | @as(u8, @intCast(a.len)));
+                    },
+                    0x10...std.math.maxInt(u16) => {
+                        _ = try out.writeByte(0xdc);
+                        const j = std.mem.nativeToBig(u16, @intCast(a.len));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
+                        _ = try out.writeByte(0xdd);
+                        const j = std.mem.nativeToBig(u32, @intCast(a.len));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    else => std.debug.panic(
+                        "Array is too large: {} > {}\n",
+                        .{ a.len, std.math.maxInt(u32) },
+                    ),
+                }
+                for (a) |v| {
+                    try v.serialize(out);
+                }
+            },
+
+            .Map => |m| {
+                const count = m.count();
+                switch (count) {
+                    0x00...0x0f => {
+                        _ = try out.writeByte(0b1000_0000 | @as(u8, @intCast(count)));
+                    },
+                    0x10...std.math.maxInt(u16) => {
+                        _ = try out.writeByte(0xde);
+                        const j = std.mem.nativeToBig(u16, @intCast(count));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
+                        _ = try out.writeByte(0xdf);
+                        const j = std.mem.nativeToBig(u32, @intCast(count));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                }
+                var itr = m.iterator();
+                while (itr.next()) |entry| {
+                    try entry.key_ptr.to_value().serialize(out);
+                    try entry.value_ptr.serialize(out);
+                }
+            },
+
+            .Ext => |e| {
+                const count = e.data.len;
+                switch (count) {
+                    0x01 => {
+                        _ = try out.writeByte(0xd4);
+                    },
+                    0x02 => {
+                        _ = try out.writeByte(0xd5);
+                    },
+                    0x04 => {
+                        _ = try out.writeByte(0xd6);
+                    },
+                    0x08 => {
+                        _ = try out.writeByte(0xd7);
+                    },
+                    0x10 => {
+                        _ = try out.writeByte(0xd8);
+                    },
+
+                    0x00, 0x03, 0x05...0x07, 0x09...0x0f, 0x11...0xff => {
+                        _ = try out.writeByte(0xc7);
+                        _ = try out.writeByte(@intCast(count));
+                    },
+                    std.math.maxInt(u8) + 1...std.math.maxInt(u16) => {
+                        _ = try out.writeByte(0xc8);
+                        const j = std.mem.nativeToBig(u16, @intCast(count));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    std.math.maxInt(u16) + 1...std.math.maxInt(u32) => {
+                        _ = try out.writeByte(0xc9);
+                        const j = std.mem.nativeToBig(u32, @intCast(count));
+                        _ = try out.write(&std.mem.toBytes(j));
+                    },
+                    std.math.maxInt(u32) + 1...std.math.maxInt(u64) => {
+                        std.debug.panic("Ext data is too large: {}\n", .{count});
+                    },
+                }
+                _ = try out.writeByte(@as(u8, @bitCast(e.type)));
+                _ = try out.write(e.data);
+            },
+        }
     }
 };
 

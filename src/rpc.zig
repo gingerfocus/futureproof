@@ -4,9 +4,9 @@ const std = @import("std");
 
 const c = @import("c.zig");
 const msgpack = @import("msgpack.zig");
-const blocking_queue = @import("blocking_queue.zig");
+const atomic = @import("atomic.zig");
 
-const RPCQueue = blocking_queue.BlockingQueue(msgpack.Value);
+const RPCQueue = atomic.BlockingQueue(msgpack.Value);
 
 const RPC_TYPE_REQUEST: u32 = 0;
 const RPC_TYPE_RESPONSE: u32 = 1;
