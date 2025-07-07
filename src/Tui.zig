@@ -74,8 +74,10 @@ pub fn init(alloc: *std.mem.Allocator) !*Self {
     );
     errdefer font.deinit();
 
-    const renderer = try Renderer.init(alloc.*, window.window, &font);
+    var renderer = try Renderer.init(alloc.*, window.window, &font);
     std.log.info("Renderer init done", .{});
+    // fixme
+    try renderer.setPreview(.{ .spirv = &.{}, .has_time = false });
 
     const x_tiles = @as(u32, @intCast(width)) / font.u.glyph_advance;
     const y_tiles = @as(u32, @intCast(height)) / font.u.glyph_height;
@@ -213,7 +215,7 @@ pub fn deinit(self: *Self) void {
     self.rpc.deinit();
     self.font.deinit();
     self.window.deinit();
-    self.renderer.deinit(self.alloc);
+    self.renderer.deinit();
 
     var itr = self.buffers.iterator();
     while (itr.next()) |buf| {
@@ -587,26 +589,26 @@ pub fn tick(self: *Self) !bool {
     }
 
     if (false) {
-    // Work around a potential deadlock: if nvim is in a blocking mode,
-    // then we can't use nvim_command, so we defer handling the shaders
-    // until then.
-    const mode = (try self.rpc.call("nvim_get_mode", .{}));
-    defer self.rpc.release(mode);
-    const key = msgpack.Key{ .RawString = "blocking" };
-    const blocking = mode.Map.get(key) orelse
-        std.debug.panic("Could not get 'blocking'", .{});
-    if (!blocking.Boolean) {
-        if (self.debounce.check()) |buf_num| {
-            // Check that the target buffer hasn't been deleted during the
-            // debouncing delay time.  If it exists, then try to compile
-            // it as a shader and load it into the preview pane.
-            if (self.buffers.get(buf_num)) |buf| {
-                const shader_text = try buf.to_buf();
-                defer self.alloc.free(shader_text);
-                try self.rebuild_preview(buf_num, shader_text);
+        // Work around a potential deadlock: if nvim is in a blocking mode,
+        // then we can't use nvim_command, so we defer handling the shaders
+        // until then.
+        const mode = (try self.rpc.call("nvim_get_mode", .{}));
+        defer self.rpc.release(mode);
+        const key = msgpack.Key{ .RawString = "blocking" };
+        const blocking = mode.Map.get(key) orelse
+            std.debug.panic("Could not get 'blocking'", .{});
+        if (!blocking.Boolean) {
+            if (self.debounce.check()) |buf_num| {
+                // Check that the target buffer hasn't been deleted during the
+                // debouncing delay time.  If it exists, then try to compile
+                // it as a shader and load it into the preview pane.
+                if (self.buffers.get(buf_num)) |buf| {
+                    const shader_text = try buf.to_buf();
+                    defer self.alloc.free(shader_text);
+                    try self.rebuild_preview(buf_num, shader_text);
+                }
             }
         }
-    }
     }
 
     self.renderer.redraw(self.total_tiles);

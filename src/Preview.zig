@@ -357,5 +357,4 @@ pub fn redraw(self: *Self) void {
 
     const cmd_buf = cmd_encoder.finish(null).?;
     self.queue.submit(&.{cmd_buf});
-    // wgpu.wgpu_queue_submit(self.queue, &cmd_buf, 1);
 }
