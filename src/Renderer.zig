@@ -6,6 +6,9 @@ const c = @import("c.zig");
 const FtAtlas = @import("FtAtlas.zig");
 const util = @import("util.zig");
 
+const Blit = @import("Blit.zig");
+const Preview = @import("Preview.zig");
+
 // const Preview = @import("Preview.zig");
 const Self = @This();
 width: u32,
@@ -38,6 +41,11 @@ alloc: std.mem.Allocator,
 // tex: wgpu.WGPUTexture,
 // tex_view: wgpu.WGPUTextureView,
 // tex_sampler: wgpu.WGPUSampler,
+
+// pub const init = initOld;
+pub const init = initNew;
+// pub const redraw = redrawOld;
+pub const redraw = redrawNew;
 
 fn getSurface(instance: *wgpu.Instance, window: *c.GLFWwindow) *wgpu.Surface {
     // Extract the WGPU Surface from the platform-specific window
@@ -77,13 +85,15 @@ fn getSurface(instance: *wgpu.Instance, window: *c.GLFWwindow) *wgpu.Surface {
         return instance.createSurface(&surfaceDescriptor).?;
     }
 }
-pub const init = initOld;
 
 const required_features = [_]wgpu.FeatureName{
     .vertex_writable_storage, // VERTEX_WRITABLE_STORAGE
 };
 
 pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtAtlas) !Self {
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+
     const instance = wgpu.Instance.create(null).?;
     const surface: *wgpu.Surface = getSurface(instance, window);
     ////////////////////////////////////////////////////////////////////////////
@@ -113,20 +123,20 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
     ////////////////////////////////////////////////////////////////////////////
 
     const vert_shader = try util.makeShader(
-        alloc,
+        arena.allocator(),
         device,
         "shaders/grid.vert.glsl",
         wgpu.ShaderStages.vertex,
     );
-    defer vert_shader.release();
+    // defer vert_shader.release();
 
     const frag_shader = try util.makeShader(
-        alloc,
+        arena.allocator(),
         device,
         "shaders/grid.frag.glsl",
         wgpu.ShaderStages.fragment,
     );
-    defer frag_shader.release();
+    // defer frag_shader.release();
 
     ////////////////////////////////////////////////////////////////////////////
     // Upload the font atlas texture
@@ -363,7 +373,7 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
         .multisample = wgpu.MultisampleState{},
     }).?;
 
-    var out = Self{
+    var renderer = Self{
         .instance = instance,
 
         // .tex = tex,
@@ -385,7 +395,7 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
         .pipeline = render_pipeline,
 
         .shader = null,
-        // .preview = null,
+        .preview = null,
         // .blit = try Blit.init(alloc, device),
 
         .dt = undefined,
@@ -394,9 +404,15 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
         .alloc = alloc,
     };
 
-    out.resetTime();
+    renderer.resetTime();
     // out.update_font_tex(font);
-    return out;
+
+    var wi: c_int = undefined;
+    var hi: c_int = undefined;
+    c.glfwGetWindowSize(window, &wi, &hi);
+    renderer.resize(@intCast(wi), @intCast(hi));
+
+    return renderer;
 }
 
 fn resetTime(self: *Self) void {
@@ -474,7 +490,6 @@ pub fn initNew(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
     return renderer;
 }
 
-pub const redraw = redrawNew;
 
 fn redrawOld(self: *Self, total_tiles: u32) void {
     const start_ms = std.time.milliTimestamp();
@@ -482,39 +497,40 @@ fn redrawOld(self: *Self, total_tiles: u32) void {
     // Render the preview to its internal texture, then blit from that
     // texture to the main swap chain.  This lets us render the preview
     // at a different resolution from the rest of the UI.
-    if (self.preview) |p| {
-        p.redraw();
-        if ((p.previewuniforms._tiles_per_side > 1 and p.previewuniforms._tile_num != 0) or
-            p.draw_continuously)
-        {
-            c.glfwPostEmptyEvent();
-        }
-    }
+    // if (self.preview) |p| {
+    //     p.redraw();
+    //     if ((p.previewuniforms._tiles_per_side > 1 and p.previewuniforms._tile_num != 0) or
+    //         p.draw_continuously)
+    //     {
+    //         c.glfwPostEmptyEvent();
+    //     }
+    // }
 
     // Begin the main render operation
-    // self.surface.configure(&(wgpu.SurfaceConfiguration){ });
-    // self.surface.getCurrentTexture(&wgpu.SurfaceTexture{ }).?;
-    // const next_texture = wgpu.wgpu_swap_chain_get_next_texture(self.swap_chain);
+    var textureresult: wgpu.SurfaceTexture = undefined;
+    self.surface.getCurrentTexture(&textureresult);
+    const texture = textureresult.texture.?;
+    defer texture.release();
+    defer texture.destroy();
+
+    const view = texture.createView(null).?;
+    defer view.release();
+
     // if (next_texture.view_id == 0) {
-    //     std.debug.panic("Cannot acquire next swap chain texture", .{});
+    // std.debug.panic("Cannot acquire next swap chain texture", .{});
     // }
+
     const cmd_encoder = self.device.createCommandEncoder(&.{
         .label = wgpu.StringView.fromSlice("main encoder"),
     }).?;
 
     const color_attachments = [_]wgpu.ColorAttachment{
-        // (wgpu.ColorAttachment){
-        //     .attachment = next_texture.view_id,
-        //     .resolve_target = 0,
-        //     .load_op = wgpu.WGPULoadOp_Clear,
-        //     .store_op = wgpu.WGPUStoreOp_Store,
-        //     .clear_value = (wgpu.WGPUColor){
-        //         .r = 0.0,
-        //         .g = 0.0,
-        //         .b = 0.0,
-        //         .a = 1.0,
-        //     },
-        // },
+        wgpu.ColorAttachment{
+            .view = view,
+            .load_op = wgpu.LoadOp.clear,
+            .clear_value = (wgpu.Color){ .r = 0.0, .g = 0.0, .b = 0.0, .a = 1.0 },
+            .store_op = wgpu.StoreOp.store,
+        },
     };
 
     const rpass = cmd_encoder.beginRenderPass(&(wgpu.RenderPassDescriptor){
@@ -522,7 +538,7 @@ fn redrawOld(self: *Self, total_tiles: u32) void {
         .color_attachment_count = color_attachments.len,
     }).?;
 
-    rpass.setPipeline(self.render_pipeline);
+    rpass.setPipeline(self.pipeline.?);
     rpass.setBindGroup(0, self.bind_group, 0, null);
     rpass.draw(total_tiles * 6, 1, 0, 0);
     rpass.end();
@@ -540,17 +556,17 @@ fn redrawOld(self: *Self, total_tiles: u32) void {
     self.dt[self.dt_index] = end_ms - start_ms;
     self.dt_index = (self.dt_index + 1) % self.dt.len;
 
-    var dt_local = self.dt;
-    const asc = comptime std.sort.asc(i64);
-    std.mem.sort(i64, dt_local[0..], {}, asc);
-    const dt = dt_local[self.dt.len / 2];
+    // var dt_local = self.dt;
+    // const asc = comptime std.sort.asc(i64);
+    // std.mem.sort(i64, dt_local[0..], {}, asc);
+    // const dt = dt_local[self.dt.len / 2];
 
-    if (dt > 33) {
-        if (self.preview) |p| {
-            p.adjust_tiles(dt);
-            self.resetTime();
-        }
-    }
+    // if (dt > 33) {
+    //     if (self.preview) |p| {
+    //         p.adjust_tiles(dt);
+    //         self.resetTime();
+    //     }
+    // }
 }
 
 fn redrawNew(self: *Self, total_tiles: u32) void {
@@ -602,9 +618,9 @@ fn redrawNew(self: *Self, total_tiles: u32) void {
     // std.time.sleep(100000);
 }
 
-pub fn deinit(self: Self) void {
+pub fn deinit(self: *Self) void {
+    self.clearPreview();
     if (self.pipeline) |p| p.release();
-    if (self.shader) |s| s.release();
 
     self.surface.release();
     self.queue.release();

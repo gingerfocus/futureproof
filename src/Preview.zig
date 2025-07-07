@@ -1,7 +1,6 @@
 const std = @import("std");
 
 // const wgpu = @import("c.zig");
-const shaderc = @import("shaderc.zig");
 const wgpu = @import("wgpu");
 
 const ext = @import("ext.zig");

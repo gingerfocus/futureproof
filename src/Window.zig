@@ -12,7 +12,7 @@ pub fn init(width: c_int, height: c_int, name: [*c]const u8) !Self {
     // c.glfwWindowHint(c.GLFW_RESIZABLE, c.GLFW_FALSE);
 
     const window = c.glfwCreateWindow(width, height, name, null, null);
-    c.glfwSetWindowSizeLimits(window, 640, 480, c.GLFW_DONT_CARE, c.GLFW_DONT_CARE);
+    // c.glfwSetWindowSizeLimits(window, 640, 480, c.GLFW_DONT_CARE, c.GLFW_DONT_CARE);
 
     // Open the window!
     if (window) |w| {
