@@ -58,9 +58,7 @@ struct fpUniforms {
 
 // ----------------------------------------------------------------------------
 
-layout(set=0, binding=2, std430) uniform Uniforms {
-    fpUniforms u;
-};
+layout(set=0, binding=2) uniform fpUniforms u;
 layout(set=0, binding=3) buffer CharGrid {
     uint[] char_grid;
 };
@@ -83,6 +81,7 @@ ivec2 vertex_position(uint i) {
         case 4: return ivec2(0, 1);
         case 5: return ivec2(1, 1);
     };
+    return ivec2(0);
 }
 
 void main() {

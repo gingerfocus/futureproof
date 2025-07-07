@@ -38,7 +38,7 @@ pub fn init(
     // const tmp_alloc: *std.mem.Allocator = &all;
     // defer arena.deinit();
 
-    // Build the shaders using shaderc
+    // Build the shader
     const shader = device.createShaderModule(wgpu.shaderModuleWGSLDescriptor(&.{
         .code = wgsl,
     })).?;
@@ -200,11 +200,10 @@ pub fn adjust_tiles(self: *Self, dt: i64) void {
 }
 
 pub fn deinit(self: *const Self) void {
-    _ = self;
-    // wgpu.wgpu_bind_group_destroy(self.bind_group);
-    // wgpu.wgpu_buffer_destroy(self.uniform_buffer);
-    // wgpu.wgpu_render_pipeline_destroy(self.render_pipeline);
-    // self.destroy_textures();
+    self.bind_group.release();
+    self.uniform_buffer.destroy();
+    self.render_pipeline.release();
+    self.destroy_textures();
 }
 
 pub fn set_size(self: *Self, width: u32, height: u32) void {
@@ -216,48 +215,42 @@ pub fn set_size(self: *Self, width: u32, height: u32) void {
         .depth_or_array_layers = 1,
     };
 
-    // var i: u8 = 0;
-    // while (i < 2) : (i += 1) {
-    //     self.tex[i] = wgpu.wgpu_device_create_texture(
-    //         self.device,
-    //         &(wgpu.WGPUTextureDescriptor){
-    //             .size = self.tex_size,
-    //             .mip_level_count = 1,
-    //             .sample_count = 1,
-    //             .dimension = wgpu.WGPUTextureDimension_D2,
-    //             .format = wgpu.WGPUTextureFormat_Bgra8Unorm,
-    //
-    //             // We render to this texture, then use it as a source when
-    //             // blitting into the final UI image
-    //             .usage = if (i == 0)
-    //                 (wgpu.WGPUTextureUsage_OUTPUT_ATTACHMENT |
-    //                     wgpu.WGPUTextureUsage_COPY_SRC)
-    //             else
-    //                 (wgpu.WGPUTextureUsage_OUTPUT_ATTACHMENT |
-    //                     wgpu.WGPUTextureUsage_COPY_SRC |
-    //                     wgpu.WGPUTextureUsage_SAMPLED |
-    //                     wgpu.WGPUTextureUsage_COPY_DST),
-    //             .label = "preview_tex",
-    //         },
-    //     );
-    //
-    //     self.tex_view[i] = wgpu.wgpu_texture_create_view(
-    //         self.tex[i],
-    //         &(wgpu.WGPUTextureViewDescriptor){
-    //             .label = "preview_tex_view",
-    //             .dimension = wgpu.WGPUTextureViewDimension_D2,
-    //             .format = wgpu.WGPUTextureFormat_Bgra8Unorm,
-    //             .aspect = wgpu.WGPUTextureAspect_All,
-    //             .base_mip_level = 0,
-    //             .level_count = 1,
-    //             .base_array_layer = 0,
-    //             .array_layer_count = 1,
-    //         },
-    //     );
-    // }
-    //
-    // self.uniforms.iResolution.x = @as(f32, @floatFromInt(width)) / 2;
-    // self.uniforms.iResolution.y = @as(f32, @floatFromInt(height));
+    var i: u8 = 0;
+    while (i < 2) : (i += 1) {
+        self.tex[i] = self.device.createTexture(&(wgpu.TextureDescriptor){
+            // .size = self.tex_size,
+            // .mip_level_count = 1,
+            // .sample_count = 1,
+            // .dimension = wgpu.WGPUTextureDimension_D2,
+            // .format = wgpu.WGPUTextureFormat_Bgra8Unorm,
+            //
+            // // We render to this texture, then use it as a source when
+            // // blitting into the final UI image
+            // .usage = if (i == 0)
+            //     (wgpu.WGPUTextureUsage_OUTPUT_ATTACHMENT |
+            //         wgpu.WGPUTextureUsage_COPY_SRC)
+            // else
+            //     (wgpu.WGPUTextureUsage_OUTPUT_ATTACHMENT |
+            //         wgpu.WGPUTextureUsage_COPY_SRC |
+            //         wgpu.WGPUTextureUsage_SAMPLED |
+            //         wgpu.WGPUTextureUsage_COPY_DST),
+            // .label = "preview_tex",
+        });
+
+        self.tex_view[i] = self.tex[i].createView(&(wgpu.TextureViewDescriptor){
+            // .label = "preview_tex_view",
+            // .dimension = wgpu.WGPUTextureViewDimension_D2,
+            // .format = wgpu.WGPUTextureFormat_Bgra8Unorm,
+            // .aspect = wgpu.WGPUTextureAspect_All,
+            // .base_mip_level = 0,
+            // .level_count = 1,
+            // .base_array_layer = 0,
+            // .array_layer_count = 1,
+        });
+    }
+
+    self.uniforms.iResolution.x = @as(f32, @floatFromInt(width)) / 2;
+    self.uniforms.iResolution.y = @as(f32, @floatFromInt(height));
 }
 
 pub fn redraw(self: *Self) void {
@@ -288,12 +281,7 @@ pub fn redraw(self: *Self) void {
             .view = if (self.previewuniforms._tiles_per_side == 1) self.tex_view[1] else self.tex_view[0],
             .load_op = load_op,
             .store_op = wgpu.StoreOp.store,
-            .clear_value = (wgpu.Color){
-                .r = 0.0,
-                .g = 0.0,
-                .b = 0.0,
-                .a = 1.0,
-            },
+            .clear_value = (wgpu.Color){ .r = 0.0, .g = 0.0, .b = 0.0, .a = 1.0 },
         },
     };
 
@@ -318,12 +306,12 @@ pub fn redraw(self: *Self) void {
         const src = (wgpu.TextureCopyView){
             .texture = self.tex[0],
             .mip_level = 0,
-            .origin = (wgpu.WGPUOrigin3d){ .x = 0, .y = 0, .z = 0 },
+            .origin = (wgpu.Origin3D){ .x = 0, .y = 0, .z = 0 },
         };
-        const dst = (wgpu.WGPUTextureCopyView){
+        const dst = (wgpu.TextureCopyView){
             .texture = self.tex[1],
             .mip_level = 0,
-            .origin = (wgpu.WGPUOrigin3d){ .x = 0, .y = 0, .z = 0 },
+            .origin = (wgpu.Origin3D){ .x = 0, .y = 0, .z = 0 },
         };
         cmd_encoder.copyBufferToTexture(&src, &dst, &self.tex_size);
         self.previewuniforms._tile_num = 0;

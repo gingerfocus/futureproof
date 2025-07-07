@@ -77,7 +77,7 @@ pub fn init(alloc: *std.mem.Allocator) !*Self {
     var renderer = try Renderer.init(alloc.*, window.window, &font);
     std.log.info("Renderer init done", .{});
     // fixme
-    try renderer.setPreview();
+    try renderer.setPreview(@embedFile("tri.wgsl"));
 
     const x_tiles = @as(u32, @intCast(width)) / font.u.glyph_advance;
     const y_tiles = @as(u32, @intCast(height)) / font.u.glyph_height;
@@ -87,8 +87,8 @@ pub fn init(alloc: *std.mem.Allocator) !*Self {
         "nvim",
         "--embed",
         "--clean",
-        "-u",
-        "config/init.vim",
+        // "-u",
+        // "config/init.vim",
     };
     var rpc = try RPC.init(&nvim_cmd, alloc);
     std.log.info("RPC init done", .{});
@@ -613,8 +613,6 @@ pub fn tick(self: *Self) !bool {
 }
 
 fn rebuild_preview(self: *Self, buf_num: u32, shader_text: []const u8) !void {
-    _ = shader_text;
-
     std.log.info("Rebuilding preview for buffer {}\n", .{buf_num});
     // const out = try shaderc.build_preview_shader(
     //     self.alloc,
@@ -631,8 +629,8 @@ fn rebuild_preview(self: *Self, buf_num: u32, shader_text: []const u8) !void {
 
     // switch (out) {
     //     .Shader => |s| {
-    //         try self.renderer.update_preview(self.alloc, s);
-    //         try self.rpc.call_release("nvim_command", .{":lclose"});
+    try self.renderer.setPreview(self.alloc, shader_text);
+    try self.rpc.call_release("nvim_command", .{":lclose"});
     //     },
     //     .Error => |e| {
     //         var arena = std.heap.ArenaAllocator.init(self.alloc.*);

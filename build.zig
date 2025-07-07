@@ -58,6 +58,7 @@ pub fn build(b: *std.Build) void {
 
     const run = b.addRunArtifact(exe);
     if (b.args) |args| run.addArgs(args);
+    run.getEnvMap().put("RUST_BACKTRACE", "1") catch @panic("OOM");
     const step = b.step("run", "Run the app");
     step.dependOn(&run.step);
 

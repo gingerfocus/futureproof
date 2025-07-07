@@ -77,7 +77,11 @@ fn getSurface(instance: *wgpu.Instance, window: *c.GLFWwindow) *wgpu.Surface {
         return instance.createSurface(&surfaceDescriptor).?;
     }
 }
-pub const init = initNew;
+pub const init = initOld;
+
+const required_features = [_]wgpu.FeatureName{
+    .vertex_writable_storage, // VERTEX_WRITABLE_STORAGE
+};
 
 pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtAtlas) !Self {
     const instance = wgpu.Instance.create(null).?;
@@ -99,6 +103,8 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
 
     const device_request = adapter.requestDeviceSync(instance, &wgpu.DeviceDescriptor{
         .required_limits = null,
+        .required_features = &required_features,
+        .required_feature_count = required_features.len,
     }, 0);
     const device: *wgpu.Device = switch (device_request.status) {
         .success => device_request.device.?,
@@ -142,19 +148,19 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
             wgpu.TextureUsages.copy_dst,
         .label = wgpu.StringView.fromSlice("font_atlas"),
     }).?;
-    tex.release();
+    // defer tex.release();
 
     const tex_view = tex.createView(&(wgpu.TextureViewDescriptor){
-        // .label = "font_atlas_view",
-        // .dimension = wgpu.WGPUTextureViewDimension_D2,
-        // .format = wgpu.WGPUTextureFormat_Rgba8Unorm,
-        // .aspect = wgpu.WGPUTextureAspect_All,
-        // .base_mip_level = 0,
-        // .level_count = 1,
-        // .base_array_layer = 0,
-        // .array_layer_count = 1,
+        .label = wgpu.StringView.fromSlice("font_atlas_view"),
+        .dimension = .@"2d",
+        .format = .rgba8_unorm,
+        .aspect = .all,
+        .base_mip_level = 0,
+        .mip_level_count = 1,
+        .base_array_layer = 0,
+        .array_layer_count = 1,
     }).?;
-    tex_view.release();
+    // defer tex_view.release();
 
     const tex_sampler = device.createSampler(&(wgpu.SamplerDescriptor){
         // .next_in_chain = null,
@@ -169,7 +175,6 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
         // .lod_max_clamp = std.math.floatMax(f32),
         // .compare = wgpu.WGPUCompareFunction_Undefined,
     }).?;
-    _ = tex_sampler;
 
     ////////////////////////////////////////////////////////////////////////////
     // Uniform buffers
@@ -187,54 +192,67 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
     ////////////////////////////////////////////////////////////////////////////
     // Bind groups (?!)
     const bind_group_layout_entries = [_]wgpu.BindGroupLayoutEntry{
-        // .{
-        //     .binding = 0,
-        //     .visibility = wgpu.ShaderStages.fragment,
-        //     // .ty = wgpu.WGPUBindingType_SampledTexture,
-        //     .multisampled = false,
-        //     .view_dimension = wgpu.WGPUTextureViewDimension_D2,
-        //     .texture_component_type = wgpu.WGPUTextureComponentType_Uint,
-        //     .storage_texture_format = wgpu.WGPUTextureFormat_Rgba8Unorm,
-        //     .count = undefined,
-        //     .has_dynamic_offset = undefined,
-        //     .min_buffer_binding_size = undefined,
-        // },
-        // .{
-        //     .binding = 1,
-        //     .visibility = wgpu.WGPUShaderStage_FRAGMENT,
-        //     .ty = wgpu.WGPUBindingType_Sampler,
-        //     .multisampled = undefined,
-        //     .view_dimension = undefined,
-        //     .texture_component_type = undefined,
-        //     .storage_texture_format = undefined,
-        //     .count = undefined,
-        //     .has_dynamic_offset = undefined,
-        //     .min_buffer_binding_size = undefined,
-        // },
-        // (wgpu.WGPUBindGroupLayoutEntry){
-        //     .binding = 2,
-        //     .visibility = wgpu.WGPUShaderStage_VERTEX | wgpu.WGPUShaderStage_FRAGMENT,
-        //     .ty = wgpu.WGPUBindingType_UniformBuffer,
-        //     .has_dynamic_offset = false,
-        //     .min_buffer_binding_size = 0,
-        //     .multisampled = undefined,
-        //     .view_dimension = undefined,
-        //     .texture_component_type = undefined,
-        //     .storage_texture_format = undefined,
-        //     .count = undefined,
-        // },
-        // (wgpu.WGPUBindGroupLayoutEntry){
-        //     .binding = 3,
-        //     .visibility = wgpu.WGPUShaderStage_VERTEX,
-        //     .ty = wgpu.WGPUBindingType_StorageBuffer,
-        //     .has_dynamic_offset = false,
-        //     .min_buffer_binding_size = 0,
-        //     .multisampled = undefined,
-        //     .view_dimension = undefined,
-        //     .texture_component_type = undefined,
-        //     .storage_texture_format = undefined,
-        //     .count = undefined,
-        // },
+        wgpu.BindGroupLayoutEntry{
+            .binding = 0,
+            .visibility = wgpu.ShaderStages.fragment,
+            .texture = wgpu.TextureBindingLayout{
+                .sample_type = wgpu.SampleType.float,
+            },
+            // .sampler = wgpu.SamplerBindingLayout{ .type = wgpu.SamplerBindingType.filtering },
+            //
+            // .ty = wgpu.WGPUBindingType_SampledTexture,
+            // .multisampled = false,
+            // .view_dimension = wgpu.WGPUTextureViewDimension_D2,
+            // .texture_component_type = wgpu.WGPUTextureComponentType_Uint,
+            // .storage_texture_format = wgpu.WGPUTextureFormat_Rgba8Unorm,
+            // .count = undefined,
+            // .has_dynamic_offset = undefined,
+            // .min_buffer_binding_size = undefined,
+        },
+        wgpu.BindGroupLayoutEntry{
+            .binding = 1,
+            .visibility = wgpu.ShaderStages.fragment,
+            .sampler = wgpu.SamplerBindingLayout{
+                .type = wgpu.SamplerBindingType.filtering,
+                // .ty = wgpu.WGPUBindingType_Sampler,
+            },
+            // .multisampled = undefined,
+            // .view_dimension = undefined,
+            // .texture_component_type = undefined,
+            // .storage_texture_format = undefined,
+            // .count = undefined,
+            // .has_dynamic_offset = undefined,
+            // .min_buffer_binding_size = undefined,
+        },
+        (wgpu.BindGroupLayoutEntry){
+            .binding = 2,
+            .visibility = wgpu.ShaderStages.vertex | wgpu.ShaderStages.fragment,
+            .buffer = wgpu.BufferBindingLayout{
+                .type = wgpu.BufferBindingType.uniform,
+            },
+            // .has_dynamic_offset = false,
+            // .min_buffer_binding_size = 0,
+            // .multisampled = undefined,
+            // .view_dimension = undefined,
+            // .texture_component_type = undefined,
+            // .storage_texture_format = undefined,
+            // .count = undefined,
+        },
+        (wgpu.BindGroupLayoutEntry){
+            .binding = 3,
+            .visibility = wgpu.ShaderStages.vertex,
+            // TODO: storage_texture and try removing feature flag
+            .buffer = wgpu.BufferBindingLayout{
+                .type = wgpu.BufferBindingType.storage,
+            },
+            // .ty = wgpu.WGPUBindingType_StorageBuffer,
+            // .has_dynamic_offset = false,
+            // .multisampled = undefined,
+            // .view_dimension = undefined,
+            // .texture_component_type = undefined,
+            // .storage_texture_format = undefined,
+            // .count = undefined,
+        },
     };
     const bind_group_layout = device.createBindGroupLayout(&(wgpu.BindGroupLayoutDescriptor){
         .label = wgpu.StringView.fromSlice("bind group layout"),
@@ -244,38 +262,38 @@ pub fn initOld(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtA
     defer bind_group_layout.release();
 
     const bind_group_entries = [_]wgpu.BindGroupEntry{
-        // (wgpu.WGPUBindGroupEntry){
-        //     .binding = 0,
-        //     .texture_view = tex_view,
-        //     .sampler = 0, // None
-        //     .buffer = 0, // None
-        //     .offset = undefined,
-        //     .size = undefined,
-        // },
-        // (wgpu.WGPUBindGroupEntry){
-        //     .binding = 1,
-        //     .sampler = tex_sampler,
-        //     .texture_view = 0, // None
-        //     .buffer = 0, // None
-        //     .offset = undefined,
-        //     .size = undefined,
-        // },
-        // (wgpu.WGPUBindGroupEntry){
-        //     .binding = 2,
-        //     .buffer = uniform_buffer,
-        //     .offset = 0,
-        //     .size = @sizeOf(wgpu.fpUniforms),
-        //     .sampler = 0, // None
-        //     .texture_view = 0, // None
-        // },
-        // (wgpu.WGPUBindGroupEntry){
-        //     .binding = 3,
-        //     .buffer = char_grid_buffer,
-        //     .offset = 0,
-        //     .size = @sizeOf(u32) * 512 * 512,
-        //     .sampler = 0, // None
-        //     .texture_view = 0, // None
-        // },
+        (wgpu.BindGroupEntry){
+            .binding = 0,
+            .texture_view = tex_view,
+            // .sampler = 0, // None
+            // .buffer = 0, // None
+            // .offset = undefined,
+            // .size = undefined,
+        },
+        (wgpu.BindGroupEntry){
+            .binding = 1,
+            .sampler = tex_sampler,
+            // .texture_view = 0, // None
+            // .buffer = 0, // None
+            // .offset = undefined,
+            // .size = undefined,
+        },
+        (wgpu.BindGroupEntry){
+            .binding = 2,
+            .buffer = uniform_buffer,
+            // .offset = 0,
+            .size = @sizeOf(c.fpUniforms),
+            // .sampler = 0, // None
+            // .texture_view = 0, // None
+        },
+        (wgpu.BindGroupEntry){
+            .binding = 3,
+            .buffer = char_grid_buffer,
+            // .offset = 0,
+            .size = @sizeOf(u32) * 512 * 512,
+            // .sampler = 0, // None
+            // .texture_view = 0, // None
+        },
     };
     const bind_group = device.createBindGroup(&(wgpu.BindGroupDescriptor){
         .label = wgpu.StringView.fromSlice("bind group"),
@@ -388,7 +406,6 @@ fn resetTime(self: *Self) void {
     }
     self.dt_index = 0;
 }
-
 
 pub fn initNew(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtAtlas) !Self {
     _ = font;
@@ -673,12 +690,13 @@ pub fn clearPreview(self: *Self) void {
 //     self.resetTime();
 // }
 
-pub fn setPreview(self: *Self) !void {
+pub fn setPreview(self: *Self, text: []const u8) !void {
     self.clearPreview();
+    std.log.info("Setting preview", .{});
 
     const shader = self.device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
-        .code = @embedFile("./tri.wgsl"),
-        .label = "tri.wgsl",
+        .code = text, // @embedFile("./tri.wgsl"),
+        .label = "thing.wgsl",
     })).?;
 
     // var caps: wgpu.SurfaceCapabilities = undefined;
