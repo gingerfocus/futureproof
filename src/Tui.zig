@@ -1,9 +1,9 @@
 const std = @import("std");
 
 const c = @import("c.zig");
-const ft = @import("ft.zig");
+const FtAtlas = @import("FtAtlas.zig");
 const msgpack = @import("msgpack.zig");
-const shaderc = @import("shaderc.zig");
+// const shaderc = @import("shaderc.zig");
 const util = @import("util.zig");
 const paste = @import("paste.zig");
 
@@ -29,13 +29,13 @@ alloc: *std.mem.Allocator,
 window: Window,
 renderer: Renderer,
 rpc: RPC,
-font: ft.Atlas,
+font: FtAtlas,
 
 buffers: std.AutoHashMap(u32, *Buffer),
 debounce: Debounce,
 
 // Persistent shader compiler to rebuild previews faster
-compiler: c.shaderc_compiler_t,
+// compiler: c.shaderc_compiler_t,
 
 char_grid: [512 * 512]u32,
 x_tiles: u32,
@@ -66,7 +66,7 @@ pub fn init(alloc: *std.mem.Allocator) !*Self {
     errdefer window.deinit();
     c.glfwGetFramebufferSize(window.window, &width, &height);
 
-    var font = try ft.build_atlas(
+    var font = try FtAtlas.build_atlas(
         alloc,
         FONT_NAME,
         FONT_SIZE,
@@ -77,7 +77,7 @@ pub fn init(alloc: *std.mem.Allocator) !*Self {
     var renderer = try Renderer.init(alloc.*, window.window, &font);
     std.log.info("Renderer init done", .{});
     // fixme
-    try renderer.setPreview(.{ .spirv = &.{}, .has_time = false });
+    try renderer.setPreview();
 
     const x_tiles = @as(u32, @intCast(width)) / font.u.glyph_advance;
     const y_tiles = @as(u32, @intCast(height)) / font.u.glyph_height;
@@ -104,7 +104,7 @@ pub fn init(alloc: *std.mem.Allocator) !*Self {
 
         .buffers = std.AutoHashMap(u32, *Buffer).init(alloc.*),
         .debounce = Debounce.init(),
-        .compiler = c.shaderc_compiler_initialize(),
+        // .compiler = c.shaderc_compiler_initialize(),
 
         .char_grid = undefined,
         .x_tiles = 0,
@@ -225,7 +225,7 @@ pub fn deinit(self: *Self) void {
         // self.alloc.destroy(buf.value);
     }
     self.buffers.deinit();
-    c.shaderc_compiler_release(self.compiler);
+    // c.shaderc_compiler_release(self.compiler);
 
     self.alloc.destroy(self);
 }
@@ -556,8 +556,6 @@ fn call_api(self: *Self, event: []const msgpack.Value) !void {
 }
 
 pub fn tick(self: *Self) !bool {
-    std.log.info("Ticking", .{});
-
     if (false) {
         while (self.rpc.get_event()) |event| {
             defer self.rpc.release(event);
@@ -581,14 +579,12 @@ pub fn tick(self: *Self) !bool {
                 try self.call_api(event.Array);
             }
         }
-    }
 
-    if (self.uniforms_changed) {
-        self.uniforms_changed = false;
-        // self.renderer.update_uniforms(&self.u);
-    }
+        if (self.uniforms_changed) {
+            self.uniforms_changed = false;
+            // self.renderer.update_uniforms(&self.u);
+        }
 
-    if (false) {
         // Work around a potential deadlock: if nvim is in a blocking mode,
         // then we can't use nvim_command, so we defer handling the shaders
         // until then.
@@ -617,13 +613,15 @@ pub fn tick(self: *Self) !bool {
 }
 
 fn rebuild_preview(self: *Self, buf_num: u32, shader_text: []const u8) !void {
+    _ = shader_text;
+
     std.log.info("Rebuilding preview for buffer {}\n", .{buf_num});
-    const out = try shaderc.build_preview_shader(
-        self.alloc,
-        self.compiler,
-        shader_text,
-    );
-    defer out.deinit(self.alloc);
+    // const out = try shaderc.build_preview_shader(
+    //     self.alloc,
+    //     self.compiler,
+    //     shader_text,
+    // );
+    // defer out.deinit(self.alloc);
 
     // Clear all of the error markers before compiling the shader
     try self.rpc.call_release("nvim_command", .{":sign unplace *"});
@@ -631,46 +629,46 @@ fn rebuild_preview(self: *Self, buf_num: u32, shader_text: []const u8) !void {
     // Clear the quick-fix list
     try self.rpc.call_release("nvim_command", .{":lexpr \"\""});
 
-    switch (out) {
-        .Shader => |s| {
-            try self.renderer.update_preview(self.alloc, s);
-            try self.rpc.call_release("nvim_command", .{":lclose"});
-        },
-        .Error => |e| {
-            var arena = std.heap.ArenaAllocator.init(self.alloc.*);
-            var all = arena.allocator();
-            const tmp_alloc: *std.mem.Allocator = &all;
-            defer arena.deinit();
-
-            self.renderer.clear_preview(self.alloc);
-
-            for (e.errs) |line_err| {
-                var line_num: u32 = 1;
-                if (line_err.line) |n| {
-                    line_num = n;
-                }
-                const cmd = try std.fmt.allocPrint(
-                    tmp_alloc.*,
-                    ":sign place {} line={} name=fpErr buffer={}",
-                    .{
-                        line_num,
-                        line_num,
-                        buf_num,
-                    },
-                );
-                try self.rpc.call_release("nvim_command", .{cmd});
-
-                const lexp = try std.fmt.allocPrint(
-                    tmp_alloc.*,
-                    ":ladd \"{}:{s}\"",
-                    .{ line_num, line_err.msg },
-                );
-                try self.rpc.call_release("nvim_command", .{lexp});
-            }
-            try self.rpc.call_release("nvim_command", .{":lopen"});
-            try self.rpc.call_release("nvim_command", .{":silent! wincmd p"});
-        },
-    }
+    // switch (out) {
+    //     .Shader => |s| {
+    //         try self.renderer.update_preview(self.alloc, s);
+    //         try self.rpc.call_release("nvim_command", .{":lclose"});
+    //     },
+    //     .Error => |e| {
+    //         var arena = std.heap.ArenaAllocator.init(self.alloc.*);
+    //         var all = arena.allocator();
+    //         const tmp_alloc: *std.mem.Allocator = &all;
+    //         defer arena.deinit();
+    //
+    //         self.renderer.clear_preview(self.alloc);
+    //
+    //         for (e.errs) |line_err| {
+    //             var line_num: u32 = 1;
+    //             if (line_err.line) |n| {
+    //                 line_num = n;
+    //             }
+    //             const cmd = try std.fmt.allocPrint(
+    //                 tmp_alloc.*,
+    //                 ":sign place {} line={} name=fpErr buffer={}",
+    //                 .{
+    //                     line_num,
+    //                     line_num,
+    //                     buf_num,
+    //                 },
+    //             );
+    //             try self.rpc.call_release("nvim_command", .{cmd});
+    //
+    //             const lexp = try std.fmt.allocPrint(
+    //                 tmp_alloc.*,
+    //                 ":ladd \"{}:{s}\"",
+    //                 .{ line_num, line_err.msg },
+    //             );
+    //             try self.rpc.call_release("nvim_command", .{lexp});
+    //         }
+    //         try self.rpc.call_release("nvim_command", .{":lopen"});
+    //         try self.rpc.call_release("nvim_command", .{":silent! wincmd p"});
+    //     },
+    // }
 }
 
 pub fn run(self: *Self) !void {
@@ -691,7 +689,7 @@ pub fn update_size(self: *Self, width: c_int, height: c_int) void {
         self.pixel_density = density;
 
         self.font.deinit();
-        self.font = ft.build_atlas(
+        self.font = FtAtlas.build_atlas(
             self.alloc,
             FONT_NAME,
             FONT_SIZE * self.pixel_density,
@@ -710,7 +708,7 @@ pub fn update_size(self: *Self, width: c_int, height: c_int) void {
     self.y_tiles = self.u.height_px / self.u.font.glyph_height;
     self.total_tiles = self.x_tiles * self.y_tiles;
 
-    self.renderer.resize_swap_chain(self.u.width_px, self.u.height_px);
+    self.renderer.resize(self.u.width_px, self.u.height_px);
     // self.renderer.update_uniforms(&self.u);
 
     self.rpc.call_release(
@@ -1002,7 +1000,7 @@ export fn key_cb(w: ?*c.GLFWwindow, key: c_int, scancode: c_int, action: c_int, 
     const tui: *Tui = @ptrCast(@alignCast(ptr));
     if (action == c.GLFW_PRESS or action == c.GLFW_REPEAT) {
         tui.on_key(key, mods) catch |err| {
-            std.debug.panic("Failed on_key: {}\n", .{err});
+            std.debug.print("Failed on_key: {}\n", .{err});
         };
     }
 }

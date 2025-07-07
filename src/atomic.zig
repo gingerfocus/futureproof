@@ -7,24 +7,29 @@ pub fn BlockingQueue(comptime T: type) type {
         inner: std.DoublyLinkedList(T),
         mutex: std.Thread.Mutex,
         event: std.Thread.ResetEvent,
-        alloc: *std.mem.Allocator,
+        alloc: std.mem.Allocator,
+        // arena: std.heap.ArenaAllocator,
 
         pub const Self = @This();
+        pub const Node = std.DoublyLinkedList(T).Node;
 
         pub fn init(alloc: *std.mem.Allocator) Self {
+            // const arena = std.heap.ArenaAllocator.init(alloc.*);
             return .{
                 .inner = std.DoublyLinkedList(T){},
                 .mutex = std.Thread.Mutex{},
                 .event = std.Thread.ResetEvent{},
-                .alloc = alloc,
+                // .arena = arena,
+                .alloc = alloc.*,
             };
         }
 
         pub fn put(self: *Self, i: T) !void {
-            const node = try self.alloc.create(std.DoublyLinkedList(T).Node);
+            // const alloc = self.arena.allocator();
+            const node = try self.alloc.create(Node);
             node.* = .{
-                .prev = undefined,
-                .next = undefined,
+                .prev = null,
+                .next = null,
                 .data = i,
             };
             self.mutex.lock();
@@ -61,7 +66,7 @@ pub fn BlockingQueue(comptime T: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            if (self.inner.first) |node| {
+            if (self.inner.popFirst()) |node| {
                 defer self.alloc.destroy(node);
                 self.check_flag();
                 return node.data;

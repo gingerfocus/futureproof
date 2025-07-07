@@ -21,12 +21,8 @@
           pkg-config
           freetype
           glfw
-          shaderc
-
+          valgrind
           wayland
-          wayland-scanner
-          wayland-protocols
-          libxkbcommon
 
           # Development
           alejandra

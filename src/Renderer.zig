@@ -1,9 +1,7 @@
 const std = @import("std");
 const wgpu = @import("wgpu");
-// const bmp = @import("bmp");
 const c = @import("c.zig");
-
-const swap_chain_format = wgpu.TextureFormat.bgra8_unorm_srgb;
+const FtAtlas = @import("FtAtlas.zig");
 
 width: u32,
 height: u32,
@@ -32,10 +30,10 @@ shader: ?*wgpu.ShaderModule,
 configured: bool = false,
 alloc: std.mem.Allocator,
 
-const ft = @import("ft.zig");
+
 const Self = @This();
 
-pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atlas) !Self {
+pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtAtlas) !Self {
     _ = font;
     const instance = wgpu.Instance.create(null).?;
 
@@ -71,10 +69,7 @@ pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atl
     };
 
     const queue = device.getQueue().?;
-    // const renderer = try alloc.create(Self);
 
-
-    // renderer.* = 
     var renderer =Self{
         .instance = instance,
 
@@ -93,14 +88,12 @@ pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atl
         .alloc = alloc,
     };
 
-    // c.glfwShowWindow(window);
-    // c.glfwFocusWindow(window);
     var wi: c_int = undefined;
     var hi: c_int = undefined;
     c.glfwGetWindowSize(window, &wi, &hi);
 
     // std.log.info("window size {d} {d}\n", .{ wi, hi });
-    renderer.resize_swap_chain(@intCast(wi), @intCast(hi));
+    renderer.resize(@intCast(wi), @intCast(hi));
 
     return renderer;
 }
@@ -114,9 +107,12 @@ pub fn redraw(self: *Self, total_tiles: u32) void {
     var textureresult: wgpu.SurfaceTexture = undefined;
     self.surface.getCurrentTexture(&textureresult);
     const texture = textureresult.texture.?;
-    const view = texture.createView(null).?;
+    defer texture.release();
+    defer texture.destroy();
 
-    std.log.info("Configured", .{});
+    const view = texture.createView(null).?;
+    defer view.release();
+
     const encoder = self.device.createCommandEncoder(&wgpu.CommandEncoderDescriptor{
         .label = wgpu.StringView.fromSlice("Command Encoder"),
     }).?;
@@ -136,11 +132,11 @@ pub fn redraw(self: *Self, total_tiles: u32) void {
         .color_attachment_count = color_attachments.len,
         .depth_stencil_attachment = null,
     }).?;
+    defer rpass.release();
 
     rpass.setPipeline(pipeline);
     rpass.draw(3, 1, 0, 0);
     rpass.end();
-    rpass.release(); // needs to be called before finish
 
     const cmds = encoder.finish(null).?;
     self.queue.submit(&.{cmds});
@@ -150,24 +146,24 @@ pub fn redraw(self: *Self, total_tiles: u32) void {
     // std.time.sleep(100000);
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: Self) void {
     if (self.pipeline) |p| p.release();
     if (self.shader) |s| s.release();
 
+    self.surface.release();
     self.queue.release();
     self.device.release();
     self.instance.release();
-    self.alloc.destroy(self);
 }
 
-pub fn resize_swap_chain(self: *Self, width: u32, height: u32) void {
+pub fn resize(self: *Self, width: u32, height: u32) void {
     std.log.info("resize {d} {d}\n", .{ width, height });
 
     self.surface.configure(&(wgpu.SurfaceConfiguration){
         .width = @intCast(width),
         .height = @intCast(height),
         .device = self.device,
-        .format = swap_chain_format,
+        .format = .bgra8_unorm_srgb,
     });
     self.configured = true;
 }
@@ -179,12 +175,10 @@ pub fn clearPreview(self: *Self) void {
     self.shader = null;
 }
 
-const Shader = @import("shaderc.zig").Shader;
+// const Shader = @import("shaderc.zig").Shader;
 
-pub fn setPreview(self: *Self, s: Shader) !void {
+pub fn setPreview(self: *Self) !void {
     self.clearPreview();
-
-    _ = s;
 
     const shader = self.device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
         .code = @embedFile("./tri.wgsl"),
@@ -203,7 +197,7 @@ pub fn setPreview(self: *Self, s: Shader) !void {
 
     const color_targets = &[_]wgpu.ColorTargetState{
         wgpu.ColorTargetState{
-            .format = swap_chain_format,
+            .format = .bgra8_unorm_srgb,
             .blend = &wgpu.BlendState.replace,
         },
     };

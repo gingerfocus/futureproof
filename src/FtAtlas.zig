@@ -1,130 +1,129 @@
 const std = @import("std");
 const c = @import("c.zig");
 
-pub const Atlas = struct {
-    const Self = @This();
+const FtAtlas = @This();
+const Self = @This();
 
-    alloc: *std.mem.Allocator,
+alloc: *std.mem.Allocator,
 
-    // Font atlas texture
-    tex: []u32,
-    tex_size: u32,
+// Font atlas texture
+tex: []u32,
+tex_size: u32,
 
-    // Position within the atlas texture
-    x: u32,
-    y: u32,
-    max_row_height: u32,
-    glyph_index: u32,
-    has_advance: bool, // is the glyph advance stored in u.glyph_advance?
+// Position within the atlas texture
+x: u32,
+y: u32,
+max_row_height: u32,
+glyph_index: u32,
+has_advance: bool, // is the glyph advance stored in u.glyph_advance?
 
-    // Conversion from codepoint to position in u.glyphs
-    table: std.hash_map.AutoHashMapUnmanaged(u32, u32),
+// Conversion from codepoint to position in u.glyphs
+table: std.hash_map.AutoHashMapUnmanaged(u32, u32),
 
-    // Freetype state
-    ft: c.FT_Library,
-    face: c.FT_Face,
+// Freetype state
+ft: c.FT_Library,
+face: c.FT_Face,
 
-    // Uniforms (synchronized with the GPU)
-    u: c.fpAtlasUniforms,
+// Uniforms (synchronized with the GPU)
+u: c.fpAtlasUniforms,
 
-    pub fn deinit(self: *Self) void {
-        status_to_err(c.FT_Done_FreeType(self.ft)) catch |err| {
-            std.debug.panic("Could not destroy library: {}", .{err});
-        };
-        self.alloc.free(self.tex);
-        self.table.deinit(self.alloc.*);
+pub fn deinit(self: *Self) void {
+    status_to_err(c.FT_Done_FreeType(self.ft)) catch |err| {
+        std.debug.panic("Could not destroy library: {}", .{err});
+    };
+    self.alloc.free(self.tex);
+    self.table.deinit(self.alloc.*);
+}
+
+pub fn get_glyph(self: *Self, codepoint: u32) ?u32 {
+    if (codepoint < 127) {
+        return codepoint;
+    }
+    return self.table.get(codepoint);
+}
+
+pub fn add_glyph(self: *Self, codepoint: u32) !u32 {
+    // New glyphs go at the back of the glyphs table
+    const g = self.glyph_index;
+    try self.table.put(self.alloc.*, codepoint, g);
+    self.glyph_index += 1;
+
+    const char_index = c.FT_Get_Char_Index(self.face, codepoint);
+    if (char_index == 0) {
+        unreachable;
+        // std.log.warn("Could not get char for codepoint {x}\n", .{codepoint});
+    }
+    try status_to_err(c.FT_Load_Glyph(
+        self.face,
+        char_index,
+        0,
+    ));
+    try status_to_err(c.FT_Render_Glyph(
+        self.face.*.glyph,
+        c.FT_RENDER_MODE_LCD,
+    ));
+    const glyph = self.face.*.glyph;
+    const bmp = &(glyph.*.bitmap);
+
+    { // Store the glyph advance
+        const advance = @as(u32, @intCast(glyph.*.advance.x >> 6));
+        if (!self.has_advance) {
+            self.has_advance = true;
+            self.u.glyph_advance = advance;
+        } else if (advance != self.u.glyph_advance) {
+            std.debug.panic("Inconsistent glyph advance; is font not fixed-width?", .{});
+        }
     }
 
-    pub fn get_glyph(self: *Self, codepoint: u32) ?u32 {
-        if (codepoint < 127) {
-            return codepoint;
-        }
-        return self.table.get(codepoint);
+    // Calculate true width (ignoring RGB, which triples width)
+    const bmp_width = bmp.*.width / 3;
+
+    // Reset to the beginning of the line
+    if (self.x + bmp_width >= self.tex_size) {
+        self.y += self.max_row_height;
+        self.x = 1;
+        self.max_row_height = 0;
     }
-
-    pub fn add_glyph(self: *Self, codepoint: u32) !u32 {
-        // New glyphs go at the back of the glyphs table
-        const g = self.glyph_index;
-        try self.table.put(self.alloc.*, codepoint, g);
-        self.glyph_index += 1;
-
-        const char_index = c.FT_Get_Char_Index(self.face, codepoint);
-        if (char_index == 0) {
-            unreachable;
-            // std.log.warn("Could not get char for codepoint {x}\n", .{codepoint});
-        }
-        try status_to_err(c.FT_Load_Glyph(
-            self.face,
-            char_index,
-            0,
-        ));
-        try status_to_err(c.FT_Render_Glyph(
-            self.face.*.glyph,
-            c.FT_RENDER_MODE_LCD,
-        ));
-        const glyph = self.face.*.glyph;
-        const bmp = &(glyph.*.bitmap);
-
-        { // Store the glyph advance
-            const advance = @as(u32, @intCast(glyph.*.advance.x >> 6));
-            if (!self.has_advance) {
-                self.has_advance = true;
-                self.u.glyph_advance = advance;
-            } else if (advance != self.u.glyph_advance) {
-                std.debug.panic("Inconsistent glyph advance; is font not fixed-width?", .{});
-            }
-        }
-
-        // Calculate true width (ignoring RGB, which triples width)
-        const bmp_width = bmp.*.width / 3;
-
-        // Reset to the beginning of the line
-        if (self.x + bmp_width >= self.tex_size) {
-            self.y += self.max_row_height;
-            self.x = 1;
-            self.max_row_height = 0;
-        }
-        if (self.y + bmp.*.rows >= self.tex_size) {
-            std.debug.panic("Ran out of atlas space", .{});
-        } else if (bmp.*.rows > self.max_row_height) {
-            self.max_row_height = bmp.*.rows;
-        }
-        var row: usize = 0;
-        const pitch: usize = @intCast(bmp.*.pitch);
-        while (row < bmp.*.rows) : (row += 1) {
-            var col: usize = 0;
-            while (col < bmp_width) : (col += 1) {
-                const p: u32 = 0 |
-                    @as(u32, bmp.*.buffer[row * pitch + col * 3]) |
-                    (@as(u32, bmp.*.buffer[row * pitch + col * 3 + 1]) << 8) |
-                    (@as(u32, bmp.*.buffer[row * pitch + col * 3 + 2]) << 16);
-                self.tex[self.x + col + self.tex_size * (row + self.y)] = p;
-            }
-        }
-        const offset = @as(i32, @intCast(self.face.*.size.*.metrics.descender >> 6));
-        self.u.glyphs[g] = c.fpGlyph{
-            .x0 = self.x,
-            .y0 = self.y,
-            .width = bmp_width,
-            .height = bmp.*.rows,
-            .x_offset = glyph.*.bitmap_left,
-            .y_offset = glyph.*.bitmap_top - @as(i32, @intCast(bmp.*.rows)) - offset,
-        };
-        self.x += bmp_width;
-
-        return g;
+    if (self.y + bmp.*.rows >= self.tex_size) {
+        std.debug.panic("Ran out of atlas space", .{});
+    } else if (bmp.*.rows > self.max_row_height) {
+        self.max_row_height = bmp.*.rows;
     }
-};
+    var row: usize = 0;
+    const pitch: usize = @intCast(bmp.*.pitch);
+    while (row < bmp.*.rows) : (row += 1) {
+        var col: usize = 0;
+        while (col < bmp_width) : (col += 1) {
+            const p: u32 = 0 |
+                @as(u32, bmp.*.buffer[row * pitch + col * 3]) |
+                (@as(u32, bmp.*.buffer[row * pitch + col * 3 + 1]) << 8) |
+                (@as(u32, bmp.*.buffer[row * pitch + col * 3 + 2]) << 16);
+            self.tex[self.x + col + self.tex_size * (row + self.y)] = p;
+        }
+    }
+    const offset = @as(i32, @intCast(self.face.*.size.*.metrics.descender >> 6));
+    self.u.glyphs[g] = c.fpGlyph{
+        .x0 = self.x,
+        .y0 = self.y,
+        .width = bmp_width,
+        .height = bmp.*.rows,
+        .x_offset = glyph.*.bitmap_left,
+        .y_offset = glyph.*.bitmap_top - @as(i32, @intCast(bmp.*.rows)) - offset,
+    };
+    self.x += bmp_width;
+
+    return g;
+}
 
 pub fn build_atlas(
     alloc: *std.mem.Allocator,
     comptime font_name: []const u8,
     font_size: u32,
     tex_size: u32,
-) !Atlas {
+) !FtAtlas {
     const tex = try alloc.alloc(u32, tex_size * tex_size);
     @memset(tex, 128);
-    var out = Atlas{
+    var out = FtAtlas{
         .alloc = alloc,
 
         .tex = tex,

@@ -2,8 +2,8 @@ const builtin = @import("builtin");
 const std = @import("std");
 
 const c = @import("c.zig");
-const shaderc = @import("shaderc.zig");
-const ft = @import("ft.zig");
+// const shaderc = @import("shaderc.zig");
+const FtAtlas = @import("FtAtlas.zig");
 
 const wgpu = @import("wgpu");
 
@@ -30,9 +30,9 @@ queue: *wgpu.Queue,
 bind_group: *wgpu.BindGroup,
 // uniform_buffer: wgpu.WGPUBuffer,
 // char_grid_buffer: wgpu.WGPUBuffer,
-//
+
 render_pipeline: *wgpu.RenderPipeline,
-//
+
 preview: ?*Preview,
 // blit: Blit,
 //
@@ -43,13 +43,9 @@ preview: ?*Preview,
 
 alloc: std.mem.Allocator,
 
-// window: if (builtin.os.tag == .linux) *Wayland else void,
-
-pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atlas) !Self {
+pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const FtAtlas) !Self {
     _ = font;
-
     const instance = wgpu.Instance.create(null).?;
-    // instance.release();
 
     // Extract the WGPU Surface from the platform-specific window
     const platform = builtin.os.tag;
@@ -100,7 +96,7 @@ pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atl
         .power_preference = .high_performance,
         .compatible_surface = surface,
         .feature_level = .compatibility,
-        .backend_type = .opengl, // .vulkan,
+        // .backend_type = .opengl, // .vulkan,
     }, 10000);
     const adapter = result.adapter.?;
     defer adapter.release();
@@ -127,25 +123,30 @@ pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atl
 
     ////////////////////////////////////////////////////////////////////////////
     // Build the shaders using shaderc
-    const vert_spv = try shaderc.build_shader_from_file(alloc, "shaders/grid.vert");
-
-    const descriptor = wgpu.shaderModuleWGSLDescriptor(wgpu.ShaderModuleWGSLMergedDescriptor{
-        .code = vert_spv.ptr,
-        .label = "vert",
-    });
-    const vert_shader = device.createShaderModule(&descriptor).?;
-    // const vert_shader = device.createShaderModuleSpirV(&.{
-    //     .source = vert_spv.ptr,
-    //     .source_size = @intCast(vert_spv.len),
+    // const vert_spv = try shaderc.build_shader_from_file(alloc, "shaders/grid.vert");
+    //
+    // const descriptor = wgpu.shaderModuleWGSLDescriptor(wgpu.ShaderModuleWGSLMergedDescriptor{
+    //     .code = vert_spv.ptr,
+    //     .label = "vert",
+    // });
+    // const vert_shader = device.createShaderModule(&descriptor).?;
+    // // const vert_shader = device.createShaderModuleSpirV(&.{
+    // //     .source = vert_spv.ptr,
+    // //     .source_size = @intCast(vert_spv.len),
+    // // }).?;
+    // defer vert_shader.release();
+    //
+    // const frag_spv = try shaderc.build_shader_from_file(alloc, "shaders/grid.frag");
+    // const frag_shader = device.createShaderModuleSpirV(&.{
+    //     .source = frag_spv.ptr,
+    //     .source_size = @intCast(frag_spv.len),
     // }).?;
-    defer vert_shader.release();
-
-    const frag_spv = try shaderc.build_shader_from_file(alloc, "shaders/grid.frag");
-    const frag_shader = device.createShaderModuleSpirV(&.{
-        .source = frag_spv.ptr,
-        .source_size = @intCast(frag_spv.len),
-    }).?;
-    defer frag_shader.release();
+    // defer frag_shader.release();
+    const text = try @import("util.zig").file_contents(alloc, "shaders/grid.wgsl");
+    const shader = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
+        .code = text,
+        .label = "frag",
+    })).?;
 
     ////////////////////////////////////////////////////////////////////////////
     // Upload the font atlas texture
@@ -334,15 +335,15 @@ pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atl
     const render_pipeline = device.createRenderPipeline(&(wgpu.RenderPipelineDescriptor){
         .layout = pipeline_layout,
         .vertex = (wgpu.VertexState){
-            .module = vert_shader,
-            .entry_point = wgpu.StringView.fromSlice("main"),
+            .module = shader,
+            .entry_point = wgpu.StringView.fromSlice("vs_main"),
             // .index_format = wgpu.WGPUIndexFormat_Uint16,
             // .vertex_buffers = null,
             // .vertex_buffers_length = 0,
         },
         .fragment = &(wgpu.FragmentState){
-            .module = frag_shader,
-            .entry_point = wgpu.StringView.fromSlice("main"),
+            .module = shader,
+            .entry_point = wgpu.StringView.fromSlice("fs_main"),
             .target_count = 1,
             .targets = &[1]wgpu.ColorTargetState{
                 .{
@@ -414,10 +415,10 @@ pub fn init(alloc: std.mem.Allocator, window: *c.GLFWwindow, font: *const ft.Atl
     return out;
 }
 
-pub fn clear_preview(self: *Self, alloc: *std.mem.Allocator) void {
+pub fn clear_preview(self: *Self) void {
     if (self.preview) |p| {
         p.deinit();
-        alloc.destroy(p);
+        self.alloc.destroy(p);
         self.preview = null;
     }
 }
@@ -431,17 +432,20 @@ fn reset_dt(self: *Self) void {
     // self.dt_index = 0;
 }
 
-pub fn update_preview(self: *Self, alloc: *std.mem.Allocator, s: Shader) !void {
-    self.clear_preview(alloc);
+pub fn setPreview(self: *Self) !void {
+    self.clear_preview();
+
 
     // Construct a new Preview with our current state
-    var p = try alloc.create(Preview);
-    p.* = try Preview.init(alloc.*, self.device, s.spirv, s.has_time);
-    p.set_size(self.width, self.height);
+    // var p = try self.alloc.create(Preview);
+    // p.* = try Preview.init(self.alloc, self.device, s.spirv, s.has_time);
+    // p.set_size(self.width, self.height);
 
-    self.preview = p;
+    // self.preview = p;
     // self.blit.bind_to_tex(p.tex_view[1]);
     self.reset_dt();
+
+    unreachable;
 }
 
 // pub fn update_font_tex(self: *Self, font: *const ft.Atlas) void {
@@ -545,9 +549,8 @@ pub fn redraw(self: *Self, total_tiles: u32) void {
     // }
 }
 
-pub fn deinit(self: *Self, alloc: *std.mem.Allocator) void {
+pub fn deinit(self: *Self) void {
     _ = self;
-    _ = alloc;
     // wgpu.wgpu_texture_destroy(self.tex);
     // wgpu.wgpu_texture_view_destroy(self.tex_view);
     // wgpu.wgpu_sampler_destroy(self.tex_sampler);
@@ -575,21 +578,21 @@ pub fn update_grid(self: *Self, char_grid: []u32) void {
     );
 }
 
-pub fn resize_swap_chain(self: *Self, width: u32, height: u32) void {
+pub fn resize(self: *Self, width: u32, height: u32) void {
     // self.surface.configure(&wgpu.SurfaceConfiguration{
     //     .ne
     // })
-    self.swap_chain = wgpu.wgpu_device_create_swap_chain(
-        self.device,
-        self.surface,
-        &(wgpu.WGPUSwapChainDescriptor){
-            .usage = wgpu.WGPUTextureUsage_OUTPUT_ATTACHMENT,
-            .format = wgpu.WGPUTextureFormat_Bgra8Unorm,
-            .width = width,
-            .height = height,
-            .present_mode = wgpu.WGPUPresentMode_Fifo,
-        },
-    );
+    // self.swap_chain = wgpu.wgpu_device_create_swap_chain(
+    //     self.device,
+    //     self.surface,
+    //     &(wgpu.WGPUSwapChainDescriptor){
+    //         .usage = wgpu.WGPUTextureUsage_OUTPUT_ATTACHMENT,
+    //         .format = wgpu.WGPUTextureFormat_Bgra8Unorm,
+    //         .width = width,
+    //         .height = height,
+    //         .present_mode = wgpu.WGPUPresentMode_Fifo,
+    //     },
+    // );
 
     // Track width and height so that we can set them in a Preview
     // (even if one isn't loaded right now)
@@ -597,7 +600,7 @@ pub fn resize_swap_chain(self: *Self, width: u32, height: u32) void {
     self.height = height;
     if (self.preview) |p| {
         p.set_size(width, height);
-        self.blit.bind_to_tex(p.tex_view[1]);
+        // self.blit.bind_to_tex(p.tex_view[1]);
     }
 }
 

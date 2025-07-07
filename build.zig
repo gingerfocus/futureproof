@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
     // exe.addLibraryPath(b.path("vendor/shaderc/lib"));
     // exe.linkSystemLibrary("shaderc_combined");
     // exe.addIncludePath(b.path("vendor/shaderc/include/"));
-    exe.linkSystemLibrary2("shaderc", .{});
+    // exe.linkSystemLibrary2("shaderc", .{});
 
     exe.addIncludePath(b.path(".")); // for "extern/futureproof.h"
 
